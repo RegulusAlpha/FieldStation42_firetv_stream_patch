@@ -1,0 +1,182 @@
+import logging
+from fs42.timings import DAYS
+from fs42.sequence_io import SequenceIO
+from fs42.media_processor import MediaProcessor
+from fs42.sequence import NamedSequence, SequenceEntry
+
+
+class SequenceAPI:
+    @staticmethod
+    def make_sequence_key(station_config, sequence_name, tag_path) -> dict:
+        return {"station_name": station_config["network_name"], "sequence_name": sequence_name, "tag_path": tag_path}
+
+    @staticmethod
+    def get_sequences_for_station(station_config):
+        _l = logging.getLogger("SEQUENCE")
+        sio = SequenceIO()
+        slist = sio.get_all_sequences_for_station(station_config['network_name'])
+        return slist
+
+    @staticmethod
+    def get_sequence(station_config, sequence_name, tag_path) -> NamedSequence:
+        _l = logging.getLogger("SEQUENCE")
+        sio = SequenceIO()
+        seq = sio.get_sequence(station_config["network_name"], sequence_name, tag_path)
+
+        if not seq:
+            _l.debug(f"Sequence {sequence_name} for {station_config['network_name']} not found.")
+            return None
+
+        return seq
+
+    @staticmethod
+    def get_next_in_sequence(station_config, sequence_name, tag_path) -> SequenceEntry:
+        _l = logging.getLogger("SEQUENCE")
+        sio = SequenceIO()
+        seq = sio.get_sequence(station_config["network_name"], sequence_name, tag_path)
+        next_entry = None
+
+        if not seq:
+            _l.error(f"Sequence {sequence_name} for {station_config['network_name']} not found.")
+            return None
+
+        # Handle first run - if current_index is 0 and less than start_index, start at start_index
+        if seq.current_index == 0 and seq.start_index > 0:
+            seq.current_index = seq.start_index
+        # Handle end of sequence - reset to 0 to loop back to beginning
+        elif seq.current_index >= seq.end_index:
+            _l.debug(
+                f"Current index {seq.current_index} reached end of sequence {sequence_name}. Looping back to 0."
+            )
+            seq.current_index = 0
+
+        next_entry = seq.episodes[seq.current_index]
+        seq.current_index += 1
+        sio.update_current_index(station_config["network_name"], sequence_name, tag_path, seq.current_index)
+
+        return next_entry
+
+    @staticmethod
+    def reset_by_episode_path(station_config, sequence_name, tag_path, episode_path):
+        _l = logging.getLogger("SEQUENCE")
+        sio = SequenceIO()
+
+        # Use the optimized database query instead of loading the entire sequence
+        success = sio.update_sequence_index_by_path(
+            station_config["network_name"],
+            sequence_name,
+            tag_path,
+            episode_path
+        )
+
+        if success:
+            _l.info(f"Reset sequence {sequence_name} to episode {episode_path}.")
+            return True
+        else:
+            _l.error(f"Episode path {episode_path} not found in sequence {sequence_name}.")
+            return False
+
+    @staticmethod
+    def delete_sequences(station_config):
+        _l = logging.getLogger("SEQUENCE")
+        _l.debug(f"Deleting sequences for {station_config['network_name']}")
+        sio = SequenceIO()
+        sio.delete_sequences_for_station(station_config["network_name"])
+        _l.debug(f"Deleted sequences for {station_config['network_name']}")
+
+    @staticmethod
+    def rebuild_sequences(station_config):
+        _l = logging.getLogger("SEQUENCE")
+        _l.debug(f"Rebuilding sequences for {station_config['network_name']}")
+        SequenceAPI.delete_sequences(station_config)
+        SequenceAPI.scan_sequences(station_config)
+        _l.debug(f"Rebuilt sequences for {station_config['network_name']}")
+
+    @staticmethod
+    def scan_sequences(station_config):
+        for slot in SequenceAPI._sequence_slots(station_config):
+            SequenceAPI._scan_sequence_slot(station_config, slot)
+
+    @staticmethod
+    def _sequence_slots(station_config):
+        # first, scan normal weekly schedule slots
+        for day in DAYS:
+            if day in station_config:
+                slots = station_config[day]
+                if not isinstance(slots, dict):
+                    continue
+
+                for slot in slots.values():
+                    if isinstance(slot, dict):
+                        yield slot
+
+        # now scan date_overrides slots, including override-only sequences
+        date_overrides = station_config.get("date_overrides", {})
+        if isinstance(date_overrides, dict):
+            for override_slots in date_overrides.values():
+                if not isinstance(override_slots, dict):
+                    continue
+
+                for slot in override_slots.values():
+                    if isinstance(slot, dict):
+                        yield slot
+
+    @staticmethod
+    def _scan_sequence_slot(station_config, slot):
+        if "sequence" not in slot or "tags" not in slot:
+            return
+
+        # the user supplied sequence name
+        if isinstance(slot["tags"], list):
+            for tag in slot["tags"]:
+                SequenceAPI._build_sequence(station_config, tag, slot)
+        else:
+            SequenceAPI._build_sequence(station_config, slot["tags"], slot)
+
+    @staticmethod
+    def _build_sequence(station_config, this_tag, slot):
+        _l = logging.getLogger("SEQUENCE")
+        seq_tag = this_tag
+        seq_name = slot["sequence"]
+
+        if seq_tag in station_config["clip_shows"]:
+            _l.error(
+                f"Schedule logic error in {station_config['network_name']}: Clip shows are not currently supported as sequences"
+            )
+            _l.error(f"{seq_tag} is in the clip shows list, but is declared as a sequence on {this_tag} as {seq_name}")
+            raise ValueError(
+                f"Schedule logic error in {station_config['network_name']}: Clip shows are not currently supported as sequences"
+            )
+
+        # check if the sequence already exists
+
+        existing = SequenceIO().get_sequence(station_config["network_name"], seq_name, seq_tag)
+        file_list = MediaProcessor._rfind_media(f"{station_config['content_dir']}/{seq_tag}")
+
+        if not existing:
+            seq_start = 0
+            seq_end = 1
+            if "sequence_start" in slot:
+                seq_start = slot["sequence_start"]
+            if "sequence_end" in slot:
+                seq_end = slot["sequence_end"]
+
+            ns = NamedSequence(station_config["network_name"], seq_name, seq_tag, seq_start, seq_end, 0, file_list)
+            SequenceIO().put_sequence(station_config["network_name"], ns)
+        else:
+            disk_files = set(str(f) for f in file_list)
+            stored_files = set(entry.fpath for entry in existing.episodes)
+            if disk_files != stored_files:
+                new_on_disk = disk_files - stored_files
+                removed_from_disk = stored_files - disk_files
+                _l.info(f"Content changed for sequence {seq_name}: +{len(new_on_disk)} new, -{len(removed_from_disk)} removed.")
+                current_file = None
+                if existing.current_index < len(existing.episodes):
+                    current_file = existing.episodes[existing.current_index].fpath
+                    _l.debug(f"Sequence {seq_name}: current_index={existing.current_index}, current_file={current_file}")
+                else:
+                    _l.debug(f"Sequence {seq_name}: current_index={existing.current_index} is out of bounds for {len(existing.episodes)} stored episodes")
+                SequenceIO().update_sequence_entries(
+                    station_config["network_name"], seq_name, seq_tag,
+                    list(disk_files), current_file, existing.current_index
+                )

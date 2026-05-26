@@ -1,0 +1,47 @@
+{
+  "station_conf": {
+    "network_name": "New Standard Channel",
+    "channel_number": 10,
+    "network_type": "standard",
+    "schedule_increment": 30,
+    "content_dir": "catalog/?",
+    "commercial_dir": "commercials/?",
+    "bump_dir": "bumps/?",
+    "commercial_free": false,
+    "day_templates": {
+      "daily": {
+        "0": {"tags": "?"},
+        "1": {"tags": "?"},
+        "2": {"tags": "?"},
+        "3": {"tags": "?"},
+        "4": {"tags": "?"},
+        "5": {"tags": "?"},
+        "6": {"tags": "?"},
+        "7": {"tags": "?"},
+        "8": {"tags": "?"},
+        "9": {"tags": "?"},
+        "10": {"tags": "?"},
+        "11": {"tags": "?"},
+        "12": {"tags": "?"},
+        "13": {"tags": "?"},
+        "14": {"tags": "?"},
+        "15": {"tags": "?"},
+        "16": {"tags": "?"},
+        "17": {"tags": "?"},
+        "18": {"tags": "?"},
+        "19": {"tags": "?"},
+        "20": {"tags": "?"},
+        "21": {"tags": "?"},
+        "22": {"tags": "?"},
+        "23": {"tags": "?"}
+      }
+    },
+    "monday": "daily",
+    "tuesday": "daily",
+    "wednesday": "daily",
+    "thursday": "daily",
+    "friday": "daily",
+    "saturday": "daily",
+    "sunday": "daily"
+  }
+}

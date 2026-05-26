@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Catalog - FieldStation42</title>
+    <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/pure-min.css">
+    <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/grids-responsive-min.css">
+    <link rel="stylesheet" id="theme-css" href="/static/themes/default.css">
+</head>
+
+<body>
+    <script src="/static/common.js"></script>
+    <script>
+        // Initialize page layout
+        document.addEventListener('DOMContentLoaded', async function () {
+            window.fs42Common.initTheme();
+
+            const logDisplay = window.fs42Common.createLogDisplay();
+
+            const content = `
+                    <div id="search-section" class="pure-u-1" style="margin-bottom: 1em;">
+                        <div class="pure-form" style="display: flex; align-items: center; gap: 0.5em;">
+                            <input type="text" id="search-input" placeholder="Search catalogs..." class="pure-input" style="flex: 1; max-width: 300px;">
+                            <button id="search-btn" class="pure-button pure-button-primary">Search</button>
+                            <button id="clear-search-btn" class="pure-button">Clear</button>
+                        </div>
+                        <div id="search-results" style="margin-top: 1em; display: none;">
+                            <h3>Search Results</h3>
+                            <div id="search-results-content"></div>
+                        </div>
+                    </div>
+                    <div class="station-select-container">
+                        <label for="station-select">Select Station:</label>
+                        <select id="station-select" class="pure-input-1"></select>
+                        <button id="rebuild-btn" class="pure-button primary" style="margin-left: 1em;">Rebuild Catalog</button>
+                    </div>
+                    <div id="station-summary" class="pure-u-1">
+                        <h2 id="station-summary-header" style="display:none;">Station Summary</h2>
+                        <div id="station-summary-table"></div>
+                    </div>
+                    ${logDisplay.replace('log-frame', 'rebuild-log-frame').replace('log-header-text', 'rebuild-log-header').replace('log-dismiss', 'rebuild-log-dismiss').replace('log-content', 'rebuild-log')}
+                    <div id="catalog-table-frame" class="pure-u-1">
+                        <h2 id="catalog-table-header" style="display:none;">Catalog Entries</h2>
+                        <div id="catalog-table"></div>
+                    </div>
+                `;
+
+            document.body.innerHTML = await window.fs42Common.createPageLayout('Catalog Manager', content);
+        });
+    </script>
+    <script src="/static/fs42_client.js"></script>
+    <script src="/static/common.js"></script>
+    <script>
+        // Declare variables in global scope
+        let stations = [];
+        let selectedStation = null;
+        let rebuildPollInterval = null;
+
+        // Wait for DOM to be ready before adding event listeners
+        document.addEventListener('DOMContentLoaded', async function () {
+            // Wait for the page layout to be created first
+            await new Promise(resolve => {
+                const checkElements = () => {
+                    if (document.getElementById('station-select')) {
+                        resolve();
+                    } else {
+                        setTimeout(checkElements, 10);
+                    }
+                };
+                checkElements();
+            });
+
+            async function loadStationsAndSummary() {
+                stations = await window.fs42Common.fetchStationSummary();
+                const select = document.getElementById('station-select');
+                select.innerHTML = '';
+                const allOpt = document.createElement('option');
+                allOpt.value = 'all';
+                allOpt.textContent = `All Channels (${stations.length})`;
+                select.appendChild(allOpt);
+                stations.forEach(station => {
+                    const opt = document.createElement('option');
+                    opt.value = station.network_name;
+                    opt.textContent = station.network_name;
+                    select.appendChild(opt);
+                });
+                selectedStation = 'all';
+                select.value = 'all';
+                document.getElementById('station-summary-table').innerHTML = '';
+                document.getElementById('catalog-table').innerHTML = '';
+                document.getElementById('rebuild-log').textContent = '';
+            }
+
+            function updateStationSummary(networkName) {
+                const header = document.getElementById('station-summary-header');
+                if (!networkName || networkName === 'all') {
+                    document.getElementById('station-summary-table').innerHTML = '';
+                    header.style.display = 'none';
+                    document.getElementById('catalog-table').innerHTML = '';
+                    document.getElementById('catalog-table-header').style.display = 'none';
+                    return;
+                }
+                const station = stations.find(s => s.network_name === networkName);
+                if (station) {
+                    document.getElementById('station-summary-table').innerHTML = window.fs42Common.renderSummaryTable([station]);
+                    header.style.display = '';
+                } else {
+                    document.getElementById('station-summary-table').innerHTML = '<p>No summary found.</p>';
+                    header.style.display = 'none';
+                }
+            }
+
+            async function loadCatalog(networkName) {
+                const entries = await window.fs42Common.fetchCatalog(networkName);
+                const table = document.getElementById('catalog-table');
+                const header = document.getElementById('catalog-table-header');
+                if (entries && entries.length > 0) {
+                    table.innerHTML = window.fs42Common.renderCatalogTable(entries);
+                    header.style.display = '';
+                } else {
+                    table.innerHTML = '';
+                    header.style.display = 'none';
+                }
+            }
+
+            function pollRebuildStatus(taskId, afterDoneCallback) {
+                if (rebuildPollInterval) {
+                    clearInterval(rebuildPollInterval);
+                }
+                const logElem = document.getElementById('rebuild-log');
+                const header = document.getElementById('rebuild-log-header');
+                const frame = document.getElementById('rebuild-log-frame');
+                const dismissBtn = document.getElementById('rebuild-log-dismiss');
+                logElem.textContent = 'Polling rebuild status...';
+                header.style.display = '';
+                frame.style.display = '';
+                dismissBtn.style.display = '';
+                rebuildPollInterval = setInterval(async () => {
+                    try {
+                        const resp = await fetch(`/build/catalog/status/${taskId}`);
+                        const data = await resp.json();
+                        if (data.error) {
+                            logElem.textContent = data.error;
+                            header.style.display = '';
+                            frame.style.display = '';
+                            dismissBtn.style.display = '';
+                            clearInterval(rebuildPollInterval);
+                            return;
+                        }
+                        logElem.textContent = data.log || '';
+                        if (data.log && data.log.length > 0) {
+                            header.style.display = '';
+                            frame.style.display = '';
+                            dismissBtn.style.display = '';
+                        } else {
+                            header.style.display = 'none';
+                            frame.style.display = 'none';
+                            dismissBtn.style.display = 'none';
+                        }
+                        if (data.status === 'done' || data.status === 'error') {
+                            clearInterval(rebuildPollInterval);
+                            if (typeof afterDoneCallback === 'function') {
+                                afterDoneCallback();
+                            }
+                        }
+                    } catch (e) {
+                        logElem.textContent = 'Error polling status.';
+                        header.style.display = '';
+                        frame.style.display = '';
+                        dismissBtn.style.display = '';
+                        clearInterval(rebuildPollInterval);
+                    }
+                }, 2000);
+            }
+
+            document.getElementById('station-select').addEventListener('change', function (e) {
+                selectedStation = e.target.value || 'all';
+                updateStationSummary(selectedStation);
+                document.getElementById('catalog-table').innerHTML = '';
+                document.getElementById('catalog-table-header').style.display = 'none';
+                document.getElementById('rebuild-log').textContent = '';
+                document.getElementById('rebuild-log-header').style.display = 'none';
+                document.getElementById('rebuild-log-frame').style.display = 'none';
+                document.getElementById('rebuild-log-dismiss').style.display = 'none';
+                if (selectedStation && selectedStation !== 'all') {
+                    loadCatalog(selectedStation);
+                }
+            });
+            document.getElementById('rebuild-log-dismiss').addEventListener('click', function () {
+                document.getElementById('rebuild-log-frame').style.display = 'none';
+                document.getElementById('rebuild-log-dismiss').style.display = 'none';
+            });
+
+            document.getElementById('rebuild-btn').addEventListener('click', async function () {
+                const station = selectedStation || 'all';
+                const stationText = station === 'all' ? 'all catalogs' : station;
+
+                document.getElementById('rebuild-log').textContent = `Starting rebuild for ${stationText}...`;
+                document.getElementById('rebuild-log-header').style.display = '';
+                document.getElementById('catalog-table').innerHTML = '';
+                document.getElementById('catalog-table-header').style.display = 'none';
+                document.getElementById('station-summary-table').innerHTML = '';
+                document.getElementById('station-summary-header').style.display = 'none';
+                try {
+                    const resp = await fetch(`/build/catalog/${station}`, {
+                        method: 'POST'
+                    });
+                    const data = await resp.json();
+                    if (data.task_id) {
+                        pollRebuildStatus(data.task_id, async function () {
+                            // After rebuild is done, fetch and display catalog entries and update summary
+                            if (selectedStation && selectedStation !== 'all') {
+                                await loadCatalog(selectedStation);
+                                updateStationSummary(selectedStation);
+                            }
+                        });
+                    } else {
+                        document.getElementById('rebuild-log').textContent = 'Error starting rebuild.';
+                    }
+                } catch (e) {
+                    document.getElementById('rebuild-log').textContent = 'Error starting rebuild.';
+                }
+            });
+
+            loadStationsAndSummary();
+            
+            // Set up search functionality
+            setupSearchHandlers();
+
+            // Search functionality
+            function setupSearchHandlers() {
+                const searchBtn = document.getElementById('search-btn');
+                const clearBtn = document.getElementById('clear-search-btn');
+                const searchInput = document.getElementById('search-input');
+                
+                if (searchBtn) {
+                    searchBtn.addEventListener('click', performSearch);
+                }
+                
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', clearSearch);
+                }
+                
+                if (searchInput) {
+                    searchInput.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            performSearch();
+                        }
+                    });
+                }
+            }
+
+            async function performSearch() {
+                const searchInput = document.getElementById('search-input');
+                const resultsDiv = document.getElementById('search-results');
+                const resultsContent = document.getElementById('search-results-content');
+                const searchBtn = document.getElementById('search-btn');
+                
+                const query = searchInput.value.trim();
+                if (!query) {
+                    alert('Please enter a search term');
+                    return;
+                }
+                
+                // Show loading state
+                searchBtn.textContent = 'Searching...';
+                searchBtn.disabled = true;
+                resultsDiv.style.display = 'block';
+                resultsContent.innerHTML = '<p>Searching all catalogs...</p>';
+                
+                try {
+                    const response = await window.fs42Api.get(`catalogs/search_all?query=${encodeURIComponent(query)}`);
+                    displaySearchResults(response, query);
+                } catch (error) {
+                    resultsContent.innerHTML = '<p style="color: red;">Error searching catalogs: ' + error.message + '</p>';
+                } finally {
+                    searchBtn.textContent = 'Search';
+                    searchBtn.disabled = false;
+                }
+            }
+
+            function displaySearchResults(response, query) {
+                const resultsContent = document.getElementById('search-results-content');
+                const results = response.results || [];
+                
+                if (results.length === 0) {
+                    resultsContent.innerHTML = `<p>No results found for "${query}".</p>`;
+                    return;
+                }
+                
+                let totalResults = 0;
+                let html = '';
+                
+                for (const stationResult of results) {
+                    const entries = stationResult.catalog_entries || [];
+                    if (entries.length > 0) {
+                        totalResults += entries.length;
+                        html += `<h4>${stationResult.network_name} (${entries.length} results)</h4>`;
+                        html += window.fs42Common.renderCatalogTable(entries);
+                    } else if (stationResult.error) {
+                        html += `<h4>${stationResult.network_name}</h4>`;
+                        html += `<p style="color: red;">Error: ${stationResult.error}</p>`;
+                    }
+                }
+                
+                if (totalResults > 0) {
+                    resultsContent.innerHTML = `<p><strong>Found ${totalResults} results across ${results.filter(r => r.catalog_entries && r.catalog_entries.length > 0).length} stations for "${query}"</strong></p>` + html;
+                } else {
+                    resultsContent.innerHTML = `<p>No results found for "${query}".</p>`;
+                }
+            }
+
+            function clearSearch() {
+                const searchInput = document.getElementById('search-input');
+                const resultsDiv = document.getElementById('search-results');
+                const resultsContent = document.getElementById('search-results-content');
+                
+                searchInput.value = '';
+                resultsDiv.style.display = 'none';
+                resultsContent.innerHTML = '';
+            }
+
+        }); // Close DOMContentLoaded event handler
+    </script>
+</body>
+
+</html>

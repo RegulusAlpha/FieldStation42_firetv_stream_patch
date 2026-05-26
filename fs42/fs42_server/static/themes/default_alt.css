@@ -1,0 +1,601 @@
+/* Clean Dark Retro Theme - Alt Color Scheme */
+.fs42-terminal {
+    background: #181825;
+    color: #e0e0e0;
+    font-family: 'IBM Plex Mono', 'VT323', 'Courier New', monospace;
+    font-size: 1.05em;
+    border-radius: 8px;
+    border: 2px solid #00ffd0;
+    box-shadow: 0 0 12px #00ffd044;
+    padding: 1em;
+    min-height: 120px;
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+    margin-bottom: 1em;
+    white-space: pre-wrap;
+}
+
+body {
+    background: linear-gradient(135deg, #181825 0%, #232347 100%);
+    min-height: 100vh;
+    color: #e0e0e0;
+    font-family: 'IBM Plex Mono', 'VT323', 'Courier New', monospace;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+a,
+li {
+    color: #e0e0e0;
+    text-shadow: 0 1px 0 #000, 0 0 8px #00ffd0;
+}
+
+.custom-menu {
+    background: #232347;
+    color: #e0e0e0;
+    border-bottom: 2px solid #00ffd0;
+    box-shadow: 0 2px 8px #00ffd044;
+}
+
+.custom-menu .pure-menu-heading {
+    color: #00ffd0;
+    font-weight: bold;
+    letter-spacing: 2px;
+    font-family: 'Press Start 2P', 'IBM Plex Mono', monospace;
+    text-shadow: 0 0 8px #00ffd088;
+}
+
+.custom-menu .pure-menu-link {
+    color: #e0e0e0;
+    font-weight: bold;
+    transition: color 0.2s;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+}
+
+.custom-menu .pure-menu-link:hover {
+    color: #00ffd0;
+    text-shadow: 0 0 8px #00ffd088;
+}
+
+@media (max-width: 48em) {
+    .pure-menu-list {
+        display: none;
+        flex-direction: column;
+        margin: 0;
+        padding: 0;
+    }
+
+    .pure-menu.pure-menu-active .pure-menu-list {
+        display: flex;
+        background: #232347;
+        position: absolute;
+        top: 3.5em;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+    }
+
+    .pure-menu-item {
+        width: 100%;
+        text-align: left;
+    }
+
+    .menu-toggle {
+        display: inline-block;
+        cursor: pointer;
+        color: #00ffd0;
+        padding: 1em;
+        font-size: 1.5em;
+        text-shadow: 0 0 8px #00ffd088;
+    }
+}
+
+@media (min-width: 48em) {
+    .menu-toggle {
+        display: none;
+    }
+
+    .pure-menu-list {
+        display: flex !important;
+        position: static;
+        background: none;
+        width: auto;
+        flex-direction: row;
+    }
+}
+
+.pure-g {
+    margin: 2em auto;
+    max-width: 900px;
+    padding: 2em;
+    background: #232347;
+    border-radius: 16px;
+    box-shadow: 0 2px 24px #00ffd044;
+}
+
+#station-summary {
+    margin-bottom: 2em;
+}
+
+h1,
+h2 {
+    margin-top: 0;
+    text-align: center;
+    color: #00ffd0;
+    text-shadow: 0 2px 5px #000, 0 0 5px #00ffd088;
+    font-family: 'Press Start 2P', 'IBM Plex Mono', monospace;
+}
+
+.pure-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1em;
+    background: #181825;
+    color: #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+    box-shadow: 0 2px 16px #00ffd044;
+}
+
+.pure-table th {
+    background: #232347;
+    color: #00ffd0;
+    font-weight: bold;
+    padding: 0.7em 0.3em;
+    border-bottom: 2px solid #00ffd0;
+    font-family: 'Press Start 2P', 'IBM Plex Mono', monospace;
+    text-shadow: 0 0 8px #00ffd088;
+}
+
+.pure-table td {
+    padding: 0.5em 0.3em;
+    text-align: left;
+    word-break: break-word;
+    border-bottom: 1px solid #232347;
+    color: #e0e0e0;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+}
+
+.pure-table tr:last-child td {
+    border-bottom: none;
+}
+
+@media (max-width: 600px) {
+    .pure-table {
+        width: 100vw;
+        margin-left: -8vw;
+        margin-right: -8vw;
+        border-radius: 0;
+        box-shadow: none;
+        background: none;
+        padding-left: 1em;
+        border: none;
+    }
+
+    .pure-table thead {
+        display: none;
+    }
+
+    .pure-table,
+    .pure-table tbody,
+    .pure-table tr,
+    .pure-table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        border: none !important;
+    }
+
+    .pure-table tr {
+        margin-bottom: 1.5em;
+        background: #232347;
+        border-radius: 12px;
+        box-shadow: 0 1px 8px #00ffd044;
+        width: 90%;
+        border: none !important;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .pure-table td {
+        padding: 0.7em 0.5em;
+        position: relative;
+        width: 100%;
+        border: none !important;
+        color: #e0e0e0;
+    }
+
+    .pure-table td:before {
+        content: attr(data-label);
+        font-weight: bold;
+        display: block;
+        margin-bottom: 0.2em;
+        color: #00ffd0;
+        text-shadow: 0 0 8px #00ffd044;
+    }
+}
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Press+Start+2P&family=VT323&display=swap');
+
+/* Form elements - Alt Theme */
+select, input, textarea {
+    background: #181825 !important;
+    color: #e0e0e0 !important;
+    border: 2px solid #00ffd0;
+    border-radius: 6px;
+    padding: 0.7em;
+    font-size: 0.95em;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+select {
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 5'%3E%3Cpath fill='%2300ffd0' d='M2 0L0 2h4zm0 5L0 3h4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7em center;
+    background-size: 0.65em auto;
+    padding-right: 2.5em;
+}
+
+select:focus, input:focus, textarea:focus {
+    border-color: #0078e7;
+    outline: none;
+    box-shadow: 
+        inset 0 2px 4px rgba(0, 0, 0, 0.3),
+        0 0 10px rgba(0, 120, 231, 0.3);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.4;
+}
+
+select option {
+    background: #181825;
+    color: #e0e0e0;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+}
+
+label {
+    display: block;
+    color: #00ffd0;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+    margin-top: 1em;
+    font-size: 0.9em;
+    font-family: 'IBM Plex Mono', 'VT323', monospace;
+    text-shadow: 0 0 6px rgba(0, 255, 208, 0.5);
+    letter-spacing: 0.3px;
+}
+
+label:first-child {
+    margin-top: 0;
+}
+
+fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+/* Form containers */
+.pure-form fieldset {
+    background: rgba(24, 24, 37, 0.95);
+    padding: 1.5em;
+    border-radius: 8px;
+    border: 1px solid #393e5c;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
+    margin-bottom: 1em;
+}
+
+/* Remote Control Styles */
+.remote-container {
+    max-width: 320px;
+    margin: 0 auto;
+    background: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+    border-radius: 25px;
+    padding: 30px 20px;
+    box-shadow: 
+        0 15px 35px rgba(0, 0, 0, 0.3),
+        inset 0 2px 5px rgba(255, 255, 255, 0.1),
+        inset 0 -2px 5px rgba(0, 0, 0, 0.3);
+    border: 2px solid #333;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+.remote-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    gap: 10px;
+}
+
+.remote-brand {
+    text-align: left;
+    color: #00ffd0;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 0 10px rgba(0, 255, 208, 0.3);
+    flex: 1;
+}
+
+.remote-screen {
+    background: #0a0a0a;
+    border: 2px inset #333;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 25px;
+    text-align: center;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+
+.button-grid {
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+}
+
+.power-section {
+    grid-template-columns: 1fr;
+    margin-bottom: 15px;
+}
+
+.number-pad {
+    grid-template-columns: repeat(3, 1fr);
+    margin-bottom: 15px;
+}
+
+.volume-channel-section {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    margin-bottom: 15px;
+    gap: 12px;
+}
+
+.function-section {
+    grid-template-columns: repeat(2, 1fr);
+    margin-bottom: 15px;
+}
+
+.now-playing {
+    background: #1a1a1a;
+    border: 2px inset #333;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+    text-align: center;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.now-playing-label {
+    color: #00ffd0;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    text-shadow: 0 0 8px rgba(0, 255, 208, 0.3);
+}
+
+.now-playing-network {
+    color: #00ffd0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    min-height: 15px;
+    text-shadow: 0 0 5px rgba(0, 255, 208, 0.3);
+}
+
+.now-playing-status {
+    color: #ffff00;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    min-height: 13px;
+    text-shadow: 0 0 5px rgba(255, 255, 0, 0.3);
+}
+
+.now-playing-title {
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    margin-bottom: 0;
+    min-height: 12px;
+    text-shadow: 0 0 5px rgba(0, 255, 0, 0.3);
+}
+
+.remote-btn {
+    background: linear-gradient(145deg, #404040, #2a2a2a);
+    border: 2px outset #555;
+    border-radius: 8px;
+    color: #e6e6e6;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 12px 8px;
+    min-height: 45px;
+    min-width: 60px;
+    cursor: pointer;
+    transition: all 0.1s;
+    box-shadow: 
+        0 3px 6px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+    user-select: none;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.remote-btn:active {
+    background: linear-gradient(145deg, #2a2a2a, #404040);
+    border: 2px inset #555;
+    box-shadow: 
+        inset 0 2px 4px rgba(0, 0, 0, 0.5),
+        0 1px 2px rgba(0, 0, 0, 0.3);
+    transform: translateY(1px);
+}
+
+.remote-btn:hover {
+    background: linear-gradient(145deg, #4a4a4a, #343434);
+}
+
+.power-btn {
+    background: linear-gradient(145deg, #8b0000, #660000);
+    color: #ffcccc;
+    font-size: 14px;
+    width: 80px;
+    height: 50px;
+}
+
+.power-btn:hover {
+    background: linear-gradient(145deg, #a00000, #750000);
+}
+
+.number-btn {
+    width: 60px;
+    height: 60px;
+    font-size: 16px;
+    border-radius: 50%;
+}
+
+.zero-btn {
+    grid-column: 2;
+}
+
+.channel-btn, .volume-btn {
+    width: 80px;
+    height: 50px;
+}
+
+.function-btn {
+    width: 120px;
+    height: 35px;
+    font-size: 10px;
+}
+
+/* Remote Control Mobile optimizations */
+@media (max-width: 480px) {
+    .remote-container {
+        max-width: 100%;
+        padding: 15px 10px;
+        margin: 0;
+        border-radius: 0;
+        border: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: auto;
+    }
+    
+    .button-grid {
+        max-width: 280px;
+        width: 100%;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .remote-btn {
+        min-height: 40px;
+        min-width: 50px;
+        font-size: 11px;
+        padding: 10px 6px;
+    }
+
+    .number-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 14px;
+    }
+
+    .channel-btn, .volume-btn {
+        width: 70px;
+        height: 45px;
+    }
+
+    .function-btn {
+        width: 100px;
+        height: 30px;
+        font-size: 9px;
+    }
+
+    .power-btn {
+        width: 70px;
+        height: 45px;
+        font-size: 12px;
+    }
+
+    .now-playing {
+        max-width: 280px;
+        width: 100%;
+        min-width: 280px;
+        margin: 8px auto;
+        padding: 10px;
+    }
+
+    .remote-header {
+        max-width: 280px;
+        width: 100%;
+        margin: 0 auto 8px auto;
+    }
+
+    .power-btn {
+        min-width: 60px;
+        height: 35px;
+        font-size: 10px;
+        padding: 8px 12px;
+    }
+
+    .remote-screen {
+        padding: 8px;
+        margin-bottom: 15px;
+        font-size: 14px;
+        min-height: 25px;
+        max-width: 280px;
+        width: 100%;
+        margin: 0 auto 15px auto;
+    }
+}
+
+/* Remote Control Extra small screens */
+@media (max-width: 320px) {
+    .remote-container {
+        max-width: 100%;
+        padding: 15px 10px;
+    }
+
+    .button-grid {
+        gap: 6px;
+    }
+
+    .now-playing {
+        max-width: 280px;
+        width: 100%;
+        min-width: 260px;
+        margin: 10px auto;
+        padding: 12px;
+    }
+}
+

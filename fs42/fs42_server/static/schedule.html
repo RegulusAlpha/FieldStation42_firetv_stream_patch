@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schedule - FieldStation42</title>
+    <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/pure-min.css">
+    <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/grids-responsive-min.css">
+    <link rel="stylesheet" id="theme-css" href="/static/themes/default.css">
+</head>
+
+<body>
+    <script src="/static/fs42_client.js"></script>
+    <script src="/static/common.js"></script>
+    <script>
+        // Declare variables in global scope
+        let stations = [];
+        let selectedStation = null;
+        let scheduleExtents = { start: null, end: null };
+        let addTimePollInterval = null;
+        let addTimeType = null;
+
+        // Initialize page layout
+        document.addEventListener('DOMContentLoaded', async function () {
+            window.fs42Common.initTheme();
+
+            const logDisplay = window.fs42Common.createLogDisplay();
+
+            const content = `
+                <div id="search-section" class="pure-u-1" style="margin-bottom: 1.5em; padding-bottom: 1.5em; border-bottom: 2px solid #e0e0e0;">
+                    <h3 style="margin-top: 0; color: #ff00cc;">Search</h3>
+                    <div class="pure-form" style="display: flex; align-items: center; gap: 0.5em;">
+                        <input type="text" id="search-input" placeholder="Search All Schedules..." class="pure-input" style="flex: 1; max-width: 300px;">
+                        <button id="search-btn" class="pure-button pure-button-primary">Search</button>
+                        <button id="clear-search-btn" class="pure-button">Clear</button>
+                    </div>
+                    <div id="search-results" style="margin-top: 1em; display: none;">
+                        <h3>Search Results</h3>
+                        <div id="search-results-content"></div>
+                    </div>
+                </div>
+                <div style="margin-bottom: 1em;">
+                    <h3 style="margin-top: 0; margin-bottom: 0.5em; color: #ff00cc;">Schedule Operations</h3>
+                    <div class="station-select-container">
+                        <label for="station-select">Select Station:</label>
+                        <select id="station-select" class="pure-input-1"></select>
+                        <label for="time-amount-select" style="margin-left: 1em;">Time to Add:</label>
+                        <select id="time-amount-select" class="pure-input-1" style="max-width: 150px;">
+                            <option value="month">Month</option>
+                            <option value="week">Week</option>
+                            <option value="day">Day</option>
+                        </select>
+                        <button id="build-schedule-btn" class="pure-button primary" style="margin-left: 1em;">Add Time</button>
+                        <button id="reset-schedules-btn" class="pure-button danger" style="margin-left: 1em;">Reset Schedule</button>
+                    </div>
+                </div>
+                <div id="station-summary" class="pure-u-1">
+                    <h2 id="station-summary-header" style="display:none;">Station Summary</h2>
+                    <div id="station-summary-table"></div>
+                </div>
+                ${logDisplay.replace('log-frame', 'add-time-log-frame').replace('log-header-text', 'add-time-log-header').replace('log-dismiss', 'add-time-log-dismiss').replace('log-content', 'add-time-log')}
+                <div id="schedule-controls" class="pure-u-1" style="display:none;">
+                    <h2 id="schedule-query-header" style="display:none;">Schedule Query</h2>
+                    <label for="start-date" id="start-date-label" style="display:none;">Start:</label>
+                    <input type="datetime-local" id="start-date" style="margin-right:1em; display:none;">
+                    <label for="end-date" id="end-date-label" style="display:none;">End:</label>
+                    <input type="datetime-local" id="end-date" style="margin-right:1em; display:none;">
+                    <button id="get-schedule" class="pure-button pure-button-primary" style="display:none;">Get Schedule</button>
+                </div>
+                <div id="schedule-table-frame" class="pure-u-1">
+                    <h2 id="schedule-blocks-header" style="display:none;">Schedule Blocks</h2>
+                    <div id="schedule-table"></div>
+                </div>
+            `;
+
+            document.body.innerHTML = await window.fs42Common.createPageLayout('Schedule Manager', content);
+
+            // Initialize functionality after DOM is created
+            initializeSchedulePage();
+            
+            // Set up search functionality
+            setupSearchHandlers();
+        });
+
+        function initializeSchedulePage() {
+            async function loadStationsAndSummary() {
+                stations = await window.fs42Common.fetchStationSummary();
+                const select = document.getElementById('station-select');
+                select.innerHTML = '';
+
+                // Filter stations that have schedules
+                const stationsWithSchedules = stations.filter(station => station._has_schedule);
+
+                const allOpt = document.createElement('option');
+                allOpt.value = 'all';
+                allOpt.textContent = `All Channels (${stationsWithSchedules.length})`;
+                select.appendChild(allOpt);
+
+                stationsWithSchedules.forEach(station => {
+                    const opt = document.createElement('option');
+                    opt.value = station.network_name;
+                    opt.textContent = station.network_name;
+                    select.appendChild(opt);
+                });
+                selectedStation = 'all';
+                select.value = 'all';
+                document.getElementById('station-summary-table').innerHTML = '';
+                document.getElementById('station-summary-header').style.display = 'none';
+                document.getElementById('schedule-controls').style.display = 'none';
+                document.getElementById('schedule-query-header').style.display = 'none';
+                document.getElementById('start-date-label').style.display = 'none';
+                document.getElementById('start-date').style.display = 'none';
+                document.getElementById('end-date-label').style.display = 'none';
+                document.getElementById('end-date').style.display = 'none';
+                document.getElementById('get-schedule').style.display = 'none';
+                document.getElementById('schedule-blocks-header').style.display = 'none';
+                document.getElementById('schedule-table').innerHTML = '';
+                document.getElementById('add-time-log').textContent = '';
+            }
+
+            function updateStationSummary(networkName) {
+                if (!networkName || networkName === 'all') {
+                    document.getElementById('station-summary-table').innerHTML = '';
+                    document.getElementById('station-summary-header').style.display = 'none';
+                    document.getElementById('schedule-controls').style.display = 'none';
+                    document.getElementById('schedule-query-header').style.display = 'none';
+                    document.getElementById('start-date-label').style.display = 'none';
+                    document.getElementById('start-date').style.display = 'none';
+                    document.getElementById('end-date-label').style.display = 'none';
+                    document.getElementById('end-date').style.display = 'none';
+                    document.getElementById('get-schedule').style.display = 'none';
+                    document.getElementById('schedule-blocks-header').style.display = 'none';
+                    document.getElementById('schedule-table').innerHTML = '';
+                    return;
+                }
+                const station = stations.find(s => s.network_name === networkName);
+                if (station) {
+                    document.getElementById('station-summary-table').innerHTML = window.fs42Common.renderSummaryTable([station]);
+                    document.getElementById('station-summary-header').style.display = '';
+                    document.getElementById('schedule-controls').style.display = '';
+                    document.getElementById('schedule-query-header').style.display = '';
+                    document.getElementById('start-date-label').style.display = '';
+                    document.getElementById('start-date').style.display = '';
+                    document.getElementById('end-date-label').style.display = '';
+                    document.getElementById('end-date').style.display = '';
+                    document.getElementById('get-schedule').style.display = '';
+                } else {
+                    document.getElementById('station-summary-table').innerHTML = '<p>No summary found.</p>';
+                    document.getElementById('station-summary-header').style.display = 'none';
+                    document.getElementById('schedule-controls').style.display = 'none';
+                    document.getElementById('schedule-query-header').style.display = 'none';
+                    document.getElementById('start-date-label').style.display = 'none';
+                    document.getElementById('start-date').style.display = 'none';
+                    document.getElementById('end-date-label').style.display = 'none';
+                    document.getElementById('end-date').style.display = 'none';
+                    document.getElementById('get-schedule').style.display = 'none';
+                }
+            }
+
+            function pollAddTimeStatus(taskId, afterDoneCallback) {
+                if (addTimePollInterval) {
+                    clearInterval(addTimePollInterval);
+                }
+                const logElem = document.getElementById('add-time-log');
+                const header = document.getElementById('add-time-log-header');
+                const frame = document.getElementById('add-time-log-frame');
+                const dismissBtn = document.getElementById('add-time-log-dismiss');
+                logElem.textContent = 'Polling add time status...';
+                header.style.display = '';
+                frame.style.display = '';
+                dismissBtn.style.display = '';
+                addTimePollInterval = setInterval(async () => {
+                    try {
+                        const resp = await fetch(`/build/schedule/add_time/status/${taskId}`);
+                        const data = await resp.json();
+                        if (data.error) {
+                            logElem.textContent = data.error;
+                            header.style.display = '';
+                            frame.style.display = '';
+                            dismissBtn.style.display = '';
+                            clearInterval(addTimePollInterval);
+                            return;
+                        }
+                        logElem.textContent = data.log || '';
+                        if (data.log && data.log.length > 0) {
+                            header.style.display = '';
+                            frame.style.display = '';
+                            dismissBtn.style.display = '';
+                        } else {
+                            header.style.display = 'none';
+                            frame.style.display = 'none';
+                            dismissBtn.style.display = 'none';
+                        }
+                        if (data.status === 'done' || data.status === 'error') {
+                            clearInterval(addTimePollInterval);
+                            if (typeof afterDoneCallback === 'function') {
+                                afterDoneCallback();
+                            }
+                        }
+                    } catch (e) {
+                        logElem.textContent = 'Error polling status.';
+                        header.style.display = '';
+                        frame.style.display = '';
+                        dismissBtn.style.display = '';
+                        clearInterval(addTimePollInterval);
+                    }
+                }, 2000);
+            }
+
+            async function loadScheduleExtents(networkName) {
+                const summary = await window.fs42Common.fetchScheduleSummary(networkName);
+                if (summary && summary.extents) {
+                    scheduleExtents = summary.extents;
+                    document.getElementById('start-date').value = summary.extents.start.replace(' ', 'T');
+                    document.getElementById('end-date').value = summary.extents.end.replace(' ', 'T');
+                }
+            }
+
+            async function getScheduleBlocks() {
+                const start = document.getElementById('start-date').value;
+                const end = document.getElementById('end-date').value;
+                let blocks;
+                if (!selectedStation) return;
+                if (start && end) {
+                    blocks = await window.fs42Common.fetchSchedule(selectedStation, start, end);
+                } else {
+                    blocks = await window.fs42Common.fetchSchedule(selectedStation);
+                }
+                if (blocks && blocks.length > 0) {
+                    document.getElementById('schedule-blocks-header').style.display = '';
+                } else {
+                    document.getElementById('schedule-blocks-header').style.display = 'none';
+                }
+                document.getElementById('schedule-table').innerHTML = window.fs42Common.renderScheduleTable(blocks);
+            }
+
+            // Event listeners
+            document.getElementById('station-select').addEventListener('change', async function (e) {
+                selectedStation = e.target.value || 'all';
+                updateStationSummary(selectedStation);
+                document.getElementById('schedule-table').innerHTML = '';
+                document.getElementById('schedule-blocks-header').style.display = 'none';
+                document.getElementById('add-time-log').textContent = '';
+                document.getElementById('add-time-log-header').style.display = 'none';
+                document.getElementById('add-time-log-frame').style.display = 'none';
+                document.getElementById('add-time-log-dismiss').style.display = 'none';
+                if (selectedStation && selectedStation !== 'all') {
+                    await loadScheduleExtents(selectedStation);
+
+                    // Set default query to 24 hours from start of current hour
+                    const now = new Date();
+                    const startOfHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0);
+                    const endOfPeriod = new Date(startOfHour.getTime() + 24 * 60 * 60 * 1000); // +24 hours
+
+                    // Format for datetime-local input (requires local time, not UTC)
+                    const formatLocalDateTime = (date) => {
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        return `${year}-${month}-${day}T${hours}:${minutes}`;
+                    };
+
+                    document.getElementById('start-date').value = formatLocalDateTime(startOfHour);
+                    document.getElementById('end-date').value = formatLocalDateTime(endOfPeriod);
+
+                    // Auto-load schedule preview for the selected channel
+                    await getScheduleBlocks();
+                } else {
+                    document.getElementById('start-date').value = '';
+                    document.getElementById('end-date').value = '';
+                }
+            });
+
+            document.getElementById('add-time-log-dismiss').addEventListener('click', function () {
+                document.getElementById('add-time-log-frame').style.display = 'none';
+                document.getElementById('add-time-log-dismiss').style.display = 'none';
+            });
+
+            document.getElementById('build-schedule-btn').addEventListener('click', async function () {
+                const amount = document.getElementById('time-amount-select').value;
+                const station = selectedStation || 'all';
+                const stationText = station === 'all' ? 'all stations' : station;
+
+                document.getElementById('add-time-log').textContent = `Starting add ${amount} for ${stationText}...`;
+                document.getElementById('add-time-log-header').style.display = '';
+                document.getElementById('add-time-log-frame').style.display = '';
+                document.getElementById('add-time-log-dismiss').style.display = '';
+                try {
+                    const resp = await fetch(`/build/schedule/add_time/${amount}/${station}`, {
+                        method: 'POST'
+                    });
+                    const data = await resp.json();
+                    let taskId = data.task_id;
+                    function pollStatus() {
+                        if (addTimePollInterval) clearInterval(addTimePollInterval);
+                        addTimePollInterval = setInterval(async () => {
+                            const resp = await fetch(`/build/schedule/add_time/status/${taskId}`);
+                            const data = await resp.json();
+                            document.getElementById('add-time-log').textContent = data.log || '';
+                            if (data.status === 'done' || data.status === 'error') {
+                                clearInterval(addTimePollInterval);
+                                if (selectedStation && selectedStation !== 'all') {
+                                    await getScheduleBlocks();
+                                }
+                            }
+                        }, 2000);
+                    }
+                    pollStatus();
+                } catch (e) {
+                    document.getElementById('add-time-log').textContent = `Error starting add ${amount}.`;
+                }
+            });
+
+            document.getElementById('reset-schedules-btn').addEventListener('click', async function () {
+                const station = selectedStation || 'all';
+                const stationText = station === 'all' ? 'all stations' : station;
+
+                // Confirmation dialog
+                const confirmMessage = station === 'all'
+                    ? 'Are you sure you want to reset schedules for ALL stations? This will delete all existing schedule data.'
+                    : `Are you sure you want to reset the schedule for ${station}? This will delete all existing schedule data for this station.`;
+
+                if (!confirm(confirmMessage)) {
+                    return;
+                }
+
+                document.getElementById('add-time-log').textContent = `Resetting schedules for ${stationText}...`;
+                document.getElementById('add-time-log-header').style.display = '';
+                document.getElementById('add-time-log-frame').style.display = '';
+                document.getElementById('add-time-log-dismiss').style.display = '';
+                try {
+                    const resp = await fetch(`/build/schedule/reset/${station}`, {
+                        method: 'POST'
+                    });
+                    const data = await resp.json();
+                    let taskId = data.task_id;
+                    function pollStatus() {
+                        if (addTimePollInterval) clearInterval(addTimePollInterval);
+                        addTimePollInterval = setInterval(async () => {
+                            const resp = await fetch(`/build/schedule/reset/status/${taskId}`);
+                            const data = await resp.json();
+                            document.getElementById('add-time-log').textContent = data.log || '';
+                            if (data.status === 'done' || data.status === 'error') {
+                                clearInterval(addTimePollInterval);
+                                if (selectedStation && selectedStation !== 'all') {
+                                    await getScheduleBlocks();
+                                }
+                            }
+                        }, 2000);
+                    }
+                    pollStatus();
+                } catch (e) {
+                    document.getElementById('add-time-log').textContent = 'Error resetting schedules.';
+                }
+            });
+
+            document.getElementById('get-schedule').addEventListener('click', getScheduleBlocks);
+
+            loadStationsAndSummary();
+        }
+
+        // Search functionality
+        function setupSearchHandlers() {
+            const searchBtn = document.getElementById('search-btn');
+            const clearBtn = document.getElementById('clear-search-btn');
+            const searchInput = document.getElementById('search-input');
+            
+            if (searchBtn) {
+                searchBtn.addEventListener('click', performSearch);
+            }
+            
+            if (clearBtn) {
+                clearBtn.addEventListener('click', clearSearch);
+            }
+            
+            if (searchInput) {
+                searchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        performSearch();
+                    }
+                });
+            }
+        }
+
+        async function performSearch() {
+            const searchInput = document.getElementById('search-input');
+            const resultsDiv = document.getElementById('search-results');
+            const resultsContent = document.getElementById('search-results-content');
+            const searchBtn = document.getElementById('search-btn');
+            
+            const query = searchInput.value.trim();
+            if (!query) {
+                alert('Please enter a search term');
+                return;
+            }
+            
+            // Show loading state
+            searchBtn.textContent = 'Searching...';
+            searchBtn.disabled = true;
+            resultsDiv.style.display = 'block';
+            resultsContent.innerHTML = '<p>Searching all schedules...</p>';
+            
+            try {
+                const response = await window.fs42Api.get(`schedules/search_all?query=${encodeURIComponent(query)}`);
+                displaySearchResults(response, query);
+            } catch (error) {
+                resultsContent.innerHTML = '<p style="color: red;">Error searching schedules: ' + error.message + '</p>';
+            } finally {
+                searchBtn.textContent = 'Search';
+                searchBtn.disabled = false;
+            }
+        }
+
+        function displaySearchResults(response, query) {
+            const resultsContent = document.getElementById('search-results-content');
+            const results = response.results || [];
+            
+            if (results.length === 0) {
+                resultsContent.innerHTML = `<p>No results found for "${query}".</p>`;
+                return;
+            }
+            
+            // Flatten all blocks and group by day
+            let allBlocks = [];
+            let totalResults = 0;
+            let stationCount = 0;
+            
+            for (const stationResult of results) {
+                const blocks = stationResult.schedule_blocks || [];
+                if (blocks.length > 0) {
+                    stationCount++;
+                    totalResults += blocks.length;
+                    for (const block of blocks) {
+                        allBlocks.push({
+                            ...block,
+                            station_name: stationResult.network_name
+                        });
+                    }
+                }
+            }
+            
+            if (totalResults === 0) {
+                resultsContent.innerHTML = `<p>No results found for "${query}".</p>`;
+                return;
+            }
+            
+            // Group blocks by day
+            const blocksByDay = {};
+            for (const block of allBlocks) {
+                const startTime = new Date(block.start_time);
+                const dayKey = startTime.toISOString().split('T')[0]; // YYYY-MM-DD format
+                const dayLabel = startTime.toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                });
+                
+                if (!blocksByDay[dayKey]) {
+                    blocksByDay[dayKey] = {
+                        label: dayLabel,
+                        blocks: []
+                    };
+                }
+                blocksByDay[dayKey].blocks.push(block);
+            }
+            
+            // Sort days and blocks within each day
+            const sortedDays = Object.keys(blocksByDay).sort();
+            for (const dayKey of sortedDays) {
+                blocksByDay[dayKey].blocks.sort((a, b) => 
+                    new Date(a.start_time) - new Date(b.start_time)
+                );
+            }
+            
+            // Generate HTML
+            let html = `<p><strong>Found ${totalResults} results across ${stationCount} stations for "${query}"</strong></p>`;
+            
+            for (const dayKey of sortedDays) {
+                const dayData = blocksByDay[dayKey];
+                html += `<h4>${dayData.label} (${dayData.blocks.length} results)</h4>`;
+                html += renderScheduleTableWithStations(dayData.blocks);
+            }
+            
+            resultsContent.innerHTML = html;
+        }
+
+        function renderScheduleTableWithStations(blocks) {
+            if (!blocks.length) return '<p>No schedule blocks found.</p>';
+            let html = '<table class="pure-table pure-table-horizontal" style="width:100%;margin-top:1em;">';
+            html += '<thead><tr><th>Start Time</th><th>End Time</th><th>Station</th><th>Title</th></tr></thead><tbody>';
+            for (const block of blocks) {
+                // Format time only (not date) for readability
+                let start = block.start_time ? formatTimeOnly(block.start_time) : '';
+                let end = block.end_time ? formatTimeOnly(block.end_time) : '';
+                html += `<tr>
+                    <td data-label='Start Time'>${start}</td>
+                    <td data-label='End Time'>${end}</td>
+                    <td data-label='Station'><strong>${block.station_name}</strong></td>
+                    <td data-label='Title'>${block.title || ''}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function formatTimeOnly(dtStr) {
+            // Returns just the time portion in HH:MM format
+            if (!dtStr) return '';
+            const d = new Date(dtStr);
+            if (isNaN(d.getTime())) return dtStr;
+            const hh = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            return `${hh}:${min}`;
+        }
+
+        function clearSearch() {
+            const searchInput = document.getElementById('search-input');
+            const resultsDiv = document.getElementById('search-results');
+            const resultsContent = document.getElementById('search-results-content');
+            
+            searchInput.value = '';
+            resultsDiv.style.display = 'none';
+            resultsContent.innerHTML = '';
+        }
+    </script>
+</body>
+
+</html>
