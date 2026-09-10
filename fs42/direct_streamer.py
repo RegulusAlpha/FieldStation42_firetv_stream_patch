@@ -26,17 +26,13 @@ class DirectHLSStreamer:
     Webpage outputs:
         /tmp/fs42-hls/master.m3u8
         /tmp/fs42-hls/live.m3u8
-        /tmp/fs42-hls/stream_00001.ts
+        /tmp/fs42-hls/web_00001.ts
         /tmp/fs42-hls/status.json
 
     Webpage support is intentionally isolated:
-        - http://...
-        - https://...
-        - file://...
-        - *.html
-        - *.htm
-
-    Normal video/image streaming does not go through Chromium.
+        - StationPlayer.show_web() should call play_web(web_config)
+        - URL/.html passed through play()/loadfile will also be treated as web capture
+        - normal video/image streaming does not go through Brave/Chromium/Xvfb
     """
 
     def __init__(self, config=None):
@@ -53,7 +49,6 @@ class DirectHLSStreamer:
         self.hls_time = str(self.config.get("hls_time", 2))
         self.hls_list_size = str(self.config.get("hls_list_size", 10))
         self.hls_delete_threshold = str(self.config.get("hls_delete_threshold", 10))
-
         self.preset = self.config.get("preset", "veryfast")
 
         # FS42 usually calls play(), then seek(). This delay lets us catch both.
@@ -63,21 +58,18 @@ class DirectHLSStreamer:
         self.subtitle_window_seconds = float(self.config.get("subtitle_window_seconds", 300))
         self.subtitle_extract_timeout = float(self.config.get("subtitle_extract_timeout", 45))
 
-        # Webpage capture settings.
+        # Webpage capture settings. Brave is preferred by _get_browser_binary().
         self.web_display = self.config.get("web_display", ":42")
         self.web_sink_name = self.config.get("web_sink_name", "fs42web")
-        self.web_chrome_profile_dir = self.config.get(
-            "web_chrome_profile_dir",
-            "/tmp/fs42-chrome-web",
-        )
+        self.web_browser_profile_dir = self.config.get("web_browser_profile_dir", "/home/aiml/fs42-brave-web")
+        # Backward-compatible alias for older code/config names.
+        self.web_chrome_profile_dir = self.config.get("web_chrome_profile_dir", self.web_browser_profile_dir)
         self.web_startup_delay = float(self.config.get("web_startup_delay", 5.0))
         self.web_fps = int(self.config.get("web_fps", 30))
         self.web_capture_audio = bool(self.config.get("web_capture_audio", True))
 
         self.proc = None
         self.http_proc = None
-
-        # Webpage-only helper processes.
         self.web_xvfb_proc = None
         self.web_browser_proc = None
 
@@ -88,7 +80,6 @@ class DirectHLSStreamer:
 
         self.stream_generation = int(time.time() * 1000)
         self.stream_started_at = time.time()
-
         self.subtitle_generation = 0
         self.subtitles_state = "none"
 
@@ -115,16 +106,6 @@ class DirectHLSStreamer:
         self._prepare_stream_dir(clear=True)
         self._start_http_server()
         self._write_status_file()
-
-         # Web channel capture support. Only used when StationPlayer.show_web()
-        # calls self.mpv.play_web(web_config).
-        self.web_display = self.config.get("web_display", ":42")
-        self.web_sink_name = self.config.get("web_sink_name", "fs42web")
-        self.web_chrome_profile_dir = self.config.get("web_chrome_profile_dir", "/tmp/fs42-chrome-web")
-        self.web_startup_delay = float(self.config.get("web_startup_delay", 5.0))
-        self.web_fps = int(self.config.get("web_fps", 30))
-        self.web_xvfb_proc = None
-        self.web_browser_proc = None
 
     # -------------------------------------------------------------------------
     # Files / status / HTTP server
@@ -173,7 +154,6 @@ class DirectHLSStreamer:
     def _write_status_file(self, file_path=None, seek_seconds=None, duration=None):
         with self.lock:
             current_file = file_path if file_path is not None else (self.current_path or "")
-
             status = {
                 "generation": self.stream_generation,
                 "subtitle_generation": self.subtitle_generation,
@@ -192,11 +172,9 @@ class DirectHLSStreamer:
             }
 
         tmp_path = self._status_path() + ".tmp"
-
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(status, f)
-
             os.replace(tmp_path, self._status_path())
         except Exception as e:
             self.log.warning("Could not write status.json: %s", e)
@@ -206,7 +184,6 @@ class DirectHLSStreamer:
             return
 
         self.log.info("Starting HLS HTTP server on port %s from %s", self.port, self.stream_dir)
-
         self.http_proc = subprocess.Popen(
             ["python3", "-m", "http.server", str(self.port), "--bind", "0.0.0.0"],
             cwd=self.stream_dir,
@@ -216,12 +193,7 @@ class DirectHLSStreamer:
         )
 
     def _write_legacy_live_alias(self):
-        """
-        Old clients may still ask for live.m3u8.
-        Point them at master.m3u8.
-        """
         live_path = os.path.join(self.stream_dir, "live.m3u8")
-
         try:
             with open(live_path, "w", encoding="utf-8") as f:
                 f.write("#EXTM3U\n")
@@ -247,20 +219,16 @@ class DirectHLSStreamer:
                 self.pending_timer.cancel()
             except Exception:
                 pass
-
             self.pending_timer = None
 
     def _schedule_start(self, file_path, seek_seconds=0.0):
         with self.lock:
             self.pending_path = file_path
             self.pending_seek = float(seek_seconds or 0.0)
-
             self._cancel_pending_start()
-
             self.pending_timer = threading.Timer(self.start_delay, self._start_pending_now)
             self.pending_timer.daemon = True
             self.pending_timer.start()
-
             self.log.info(
                 "Scheduled FFmpeg stream start: input=%s seek=%.2f delay=%.2fs",
                 self.pending_path,
@@ -272,7 +240,6 @@ class DirectHLSStreamer:
         with self.lock:
             file_path = self.pending_path
             seek_seconds = self.pending_seek
-
             self.pending_path = None
             self.pending_seek = 0.0
             self.pending_timer = None
@@ -282,12 +249,10 @@ class DirectHLSStreamer:
 
     def play(self, file_path):
         duration = self._get_duration(file_path)
-
         with self.lock:
             self.current_path = file_path
             self.duration = duration
             self.seek_offset = 0.0
-
         self._schedule_start(file_path, 0.0)
 
     def command(self, *args):
@@ -303,12 +268,10 @@ class DirectHLSStreamer:
             if len(args) >= 2:
                 file_path = args[1]
                 duration = self._get_duration(file_path)
-
                 with self.lock:
                     self.current_path = file_path
                     self.duration = duration
                     self.seek_offset = 0.0
-
                 self._schedule_start(file_path, 0.0)
             return
 
@@ -345,7 +308,6 @@ class DirectHLSStreamer:
 
                 if current:
                     self._schedule_start(current, seconds)
-
             return
 
         if cmd == "show-text":
@@ -366,36 +328,9 @@ class DirectHLSStreamer:
     # Process cleanup
     # -------------------------------------------------------------------------
 
-    def _stop_webpage_processes(self):
-        for name, proc in [
-            ("Chromium", self.web_browser_proc),
-            ("Xvfb", self.web_xvfb_proc),
-        ]:
-            if proc and proc.poll() is None:
-                self.log.info("Stopping webpage process: %s", name)
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                    proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except Exception:
-                        pass
-
-        self.web_browser_proc = None
-        self.web_xvfb_proc = None
-
-    def _stop_ffmpeg(self):
-        with self.lock:
-            self._cancel_pending_start()
-
-            proc = self.proc
-            self.proc = None
-            self.started_at = None
-            self.seek_offset = 0.0
-
+    def _kill_process_group(self, proc, name):
         if proc and proc.poll() is None:
-            self.log.info("Stopping FFmpeg")
+            self.log.info("Stopping %s", name)
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 proc.wait(timeout=3)
@@ -405,14 +340,38 @@ class DirectHLSStreamer:
                 except Exception:
                     pass
 
-        self._stop_webpage_processes()
+    def _stop_web_processes(self):
+        self._kill_process_group(self.web_browser_proc, "web browser")
+        self._kill_process_group(self.web_xvfb_proc, "Xvfb")
+        self.web_browser_proc = None
+        self.web_xvfb_proc = None
+
+    # Backward-compatible name used by older patch attempts.
+    def _stop_webpage_processes(self):
+        self._stop_web_processes()
+
+    def _stop_ffmpeg(self):
+        with self.lock:
+            self._cancel_pending_start()
+            proc = self.proc
+            self.proc = None
+            self.started_at = None
+            self.seek_offset = 0.0
+
+        self._kill_process_group(proc, "FFmpeg")
+        self._stop_web_processes()
 
     def stop(self):
         self._stop_ffmpeg()
 
+    def stop_web(self):
+        self.log.info("Stopping web HLS capture")
+        self.stop()
+
     def terminate(self):
         self._stop_ffmpeg()
         self._stop_web_processes()
+
         if self.http_proc and self.http_proc.poll() is None:
             self.log.info("Stopping HLS HTTP server")
             try:
@@ -433,7 +392,6 @@ class DirectHLSStreamer:
     def _is_webpage(self, path):
         value = str(path or "").strip()
         lower = value.lower()
-
         return (
             lower.startswith("http://")
             or lower.startswith("https://")
@@ -444,24 +402,31 @@ class DirectHLSStreamer:
 
     def _web_url_for_path(self, path):
         value = str(path or "").strip()
-
         if value.startswith("http://") or value.startswith("https://") or value.startswith("file://"):
             return value
-
         if value.lower().endswith(".html") or value.lower().endswith(".htm"):
             return Path(value).resolve().as_uri()
-
         return value
 
-    def _get_chromium_binary(self):
-        for name in ["chromium-browser", "chromium", "google-chrome", "google-chrome-stable"]:
+    def _get_browser_binary(self):
+        for name in [
+            "brave-browser",
+            "brave",
+            "chromium-browser",
+            "chromium",
+            "google-chrome",
+            "google-chrome-stable",
+        ]:
             found = shutil.which(name)
             if found:
                 return found
-
         return None
 
-    def _ensure_pulse_sink(self):
+    # Backward-compatible name used by older patch attempts.
+    def _get_chromium_binary(self):
+        return self._get_browser_binary()
+
+    def _ensure_web_audio_sink(self):
         if not self.web_capture_audio:
             return False
 
@@ -509,332 +474,21 @@ class DirectHLSStreamer:
             self.log.warning("PulseAudio sink setup failed: %s", e)
             return False
 
-    def _start_webpage_renderer(self, url):
-        chromium = self._get_chromium_binary()
-        if not chromium:
-            raise RuntimeError("Chromium not found. Install chromium-browser or chromium.")
+    # Backward-compatible name used by older patch attempts.
+    def _ensure_pulse_sink(self):
+        return self._ensure_web_audio_sink()
 
-        self._stop_webpage_processes()
+    def _start_hidden_browser(self, web_url):
+        browser = self._get_browser_binary()
+        if not browser:
+            raise RuntimeError("Browser not found. Install brave-browser, chromium-browser, chromium, or google-chrome.")
 
-        try:
-            shutil.rmtree(self.web_chrome_profile_dir, ignore_errors=True)
-        except Exception:
-            pass
+        self._stop_web_processes()
 
+        # Do not delete the profile; this preserves Brave/Chromium extensions.
         Path(self.web_chrome_profile_dir).mkdir(parents=True, exist_ok=True)
 
         display_screen = f"{self.width}x{self.height}x24"
-
-        xvfb_cmd = [
-            "Xvfb",
-            self.web_display,
-            "-screen",
-            "0",
-            display_screen,
-            "-nolisten",
-            "tcp",
-        ]
-
-        self.log.info("Starting hidden Xvfb display: %s", " ".join(xvfb_cmd))
-
-        self.web_xvfb_proc = subprocess.Popen(
-            xvfb_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid,
-        )
-
-        time.sleep(1.0)
-
-        if self.web_xvfb_proc.poll() is not None:
-            raise RuntimeError("Xvfb failed to start")
-
-        env = os.environ.copy()
-
-        # Force Chromium into the hidden display.
-        env["DISPLAY"] = self.web_display
-        env.pop("WAYLAND_DISPLAY", None)
-
-        audio_ok = self._ensure_pulse_sink()
-
-        if audio_ok:
-            env["PULSE_SINK"] = self.web_sink_name
-
-        chrome_cmd = [
-            chromium,
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--disable-features=AudioServiceSandbox",
-            "--autoplay-policy=no-user-gesture-required",
-            "--ozone-platform=x11",
-            f"--window-size={self.width},{self.height}",
-            "--start-fullscreen",
-            "--kiosk",
-            url,
-            f"--user-data-dir={self.web_chrome_profile_dir}",
-        ]
-
-        self.log.info("Starting hidden Chromium webpage channel: %s", url)
-        self.log.info("Chromium DISPLAY=%s WAYLAND_DISPLAY=%s", env.get("DISPLAY"), env.get("WAYLAND_DISPLAY"))
-
-        self.web_browser_proc = subprocess.Popen(
-            chrome_cmd,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid,
-        )
-
-        time.sleep(self.web_startup_delay)
-
-        if self.web_browser_proc.poll() is not None:
-            raise RuntimeError("Chromium failed to start")
-
-        return audio_ok
-
-    def _build_webpage_ffmpeg_command(self, file_path, out_path, segment_pattern):
-        url = self._web_url_for_path(file_path)
-        audio_ok = self._start_webpage_renderer(url)
-
-        with self.lock:
-            self.audio_tracks = [
-                {
-                    "track": 0,
-                    "stream_index": None,
-                    "language": "und",
-                    "title": "Webpage Audio" if audio_ok else "Generated Silent Audio",
-                    "codec": "pulse" if audio_ok else "generated",
-                    "channels": 2,
-                    "channel_layout": "stereo",
-                    "display_name": "Webpage Audio" if audio_ok else "Generated Silent Audio",
-                    "hls_name": "Webpage_Audio" if audio_ok else "Generated_Silent_Audio",
-                }
-            ]
-            self.subtitle_tracks = []
-            self.subtitles_state = "none"
-
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-fflags",
-            "+genpts+discardcorrupt",
-            "-err_detect",
-            "ignore_err",
-            "-y",
-            "-f",
-            "x11grab",
-            "-draw_mouse",
-            "0",
-            "-video_size",
-            f"{self.width}x{self.height}",
-            "-framerate",
-            str(self.web_fps),
-            "-i",
-            f"{self.web_display}.0",
-        ]
-
-        if audio_ok:
-            cmd += [
-                "-f",
-                "pulse",
-                "-i",
-                f"{self.web_sink_name}.monitor",
-            ]
-        else:
-            cmd += [
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=channel_layout=stereo:sample_rate=48000",
-            ]
-
-        cmd += [
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-vf",
-            "format=yuv420p",
-            "-c:v",
-            "libx264",
-            "-preset",
-            self.preset,
-            "-profile:v",
-            "main",
-            "-level:v",
-            "3.1",
-            "-tune",
-            "zerolatency",
-            "-b:v",
-            self.video_bitrate,
-            "-maxrate",
-            self.video_bitrate,
-            "-bufsize",
-            "5000k",
-            "-g",
-            "60",
-            "-keyint_min",
-            "60",
-            "-sc_threshold",
-            "0",
-            "-force_key_frames",
-            "expr:gte(t,n_forced*2)",
-            "-c:a",
-            "aac",
-            "-b:a",
-            self.audio_bitrate,
-            "-ac",
-            "2",
-            "-ar",
-            "48000",
-            "-f",
-            "hls",
-            "-hls_time",
-            self.hls_time,
-            "-hls_list_size",
-            self.hls_list_size,
-            "-hls_delete_threshold",
-            self.hls_delete_threshold,
-            "-hls_flags",
-            "delete_segments+omit_endlist+independent_segments+program_date_time",
-            "-hls_allow_cache",
-            "0",
-            "-start_number",
-            str(int(time.time())),
-            "-reset_timestamps",
-            "1",
-            "-hls_segment_filename",
-            segment_pattern,
-            out_path,
-        ]
-
-        self.log.info("Webpage FFmpeg command ready for %s", url)
-        return cmd
-    
-    def _get_chromium_binary(self):
-        for name in ["chromium-browser", "chromium", "google-chrome", "google-chrome-stable"]:
-            found = shutil.which(name)
-            if found:
-                return found
-        return None
-
-    def _ensure_web_audio_sink(self):
-        pactl = shutil.which("pactl")
-        if not pactl:
-            self.log.warning("pactl not found; webpage stream will use silent audio")
-            return False
-
-        try:
-            result = subprocess.run(
-                [pactl, "list", "short", "sinks"],
-                text=True,
-                capture_output=True,
-                timeout=5,
-            )
-
-            if result.returncode == 0:
-                for line in result.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[1] == self.web_sink_name:
-                        return True
-
-            create = subprocess.run(
-                [
-                    pactl,
-                    "load-module",
-                    "module-null-sink",
-                    f"sink_name={self.web_sink_name}",
-                    "sink_properties=device.description=FS42Web",
-                ],
-                text=True,
-                capture_output=True,
-                timeout=5,
-            )
-
-            if create.returncode != 0:
-                self.log.warning("Could not create PulseAudio sink; webpage stream will use silent audio")
-                if create.stderr:
-                    self.log.warning("pactl: %s", create.stderr.strip())
-                return False
-
-            return True
-
-        except Exception as e:
-            self.log.warning("PulseAudio sink setup failed: %s", e)
-            return False
-
-    def _stop_web_processes(self):
-        for name, proc in [
-            ("Chromium", self.web_browser_proc),
-            ("Xvfb", self.web_xvfb_proc),
-        ]:
-            if proc and proc.poll() is None:
-                self.log.info("Stopping webpage process: %s", name)
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                    proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except Exception:
-                        pass
-
-        self.web_browser_proc = None
-        self.web_xvfb_proc = None
-
-    def stop_web(self):
-        self.log.info("Stopping web HLS capture")
-        self.stop()
-        self._stop_web_processes()
-
-    def play_web(self, web_config):
-        """
-        Start a hidden webpage capture stream.
-
-        This is intentionally separate from normal self.play(file_path), so
-        normal video/image streaming stays untouched.
-        """
-        web_url = (
-            web_config.get("web_url")
-            or web_config.get("url")
-            or web_config.get("uri")
-            or web_config.get("href")
-        )
-
-        if not web_url:
-            raise RuntimeError(f"play_web called without web_url/url: {web_config}")
-
-        self.log.info("Starting hidden webpage HLS capture: %s", web_url)
-
-        # Stop normal FFmpeg/file stream first.
-        self.stop()
-        self._stop_web_processes()
-
-        # Clean HLS directory, but keep HTTP server alive.
-        try:
-            shutil.rmtree(self.stream_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-        Path(self.stream_dir).mkdir(parents=True, exist_ok=True)
-        self._start_http_server()
-
-        chromium = self._get_chromium_binary()
-        if not chromium:
-            raise RuntimeError("Chromium not found. Install chromium-browser or chromium.")
-
-        try:
-            shutil.rmtree(self.web_chrome_profile_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-        Path(self.web_chrome_profile_dir).mkdir(parents=True, exist_ok=True)
-
-        display_screen = f"{self.width}x{self.height}x24"
-
         xvfb_cmd = [
             "Xvfb",
             self.web_display,
@@ -846,7 +500,6 @@ class DirectHLSStreamer:
         ]
 
         self.log.info("Starting hidden Xvfb: %s", " ".join(xvfb_cmd))
-
         self.web_xvfb_proc = subprocess.Popen(
             xvfb_cmd,
             stdout=subprocess.DEVNULL,
@@ -855,7 +508,6 @@ class DirectHLSStreamer:
         )
 
         time.sleep(1.0)
-
         if self.web_xvfb_proc.poll() is not None:
             raise RuntimeError("Xvfb failed to start")
 
@@ -864,13 +516,11 @@ class DirectHLSStreamer:
         env = os.environ.copy()
         env["DISPLAY"] = self.web_display
         env.pop("WAYLAND_DISPLAY", None)
-
         if audio_ok:
             env["PULSE_SINK"] = self.web_sink_name
 
-        chrome_cmd = [
-            chromium,
-            "--no-sandbox",
+        browser_cmd = [
+            browser,
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--disable-features=AudioServiceSandbox",
@@ -883,11 +533,12 @@ class DirectHLSStreamer:
             f"--user-data-dir={self.web_chrome_profile_dir}",
         ]
 
-        self.log.info("Starting hidden Chromium: %s", web_url)
-        self.log.info("Chromium DISPLAY=%s WAYLAND_DISPLAY=%s", env.get("DISPLAY"), env.get("WAYLAND_DISPLAY"))
+        self.log.info("Starting hidden browser: %s", web_url)
+        self.log.info("Browser binary=%s", browser)
+        self.log.info("Browser DISPLAY=%s WAYLAND_DISPLAY=%s", env.get("DISPLAY"), env.get("WAYLAND_DISPLAY"))
 
         self.web_browser_proc = subprocess.Popen(
-            chrome_cmd,
+            browser_cmd,
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -895,13 +546,12 @@ class DirectHLSStreamer:
         )
 
         time.sleep(self.web_startup_delay)
-
         if self.web_browser_proc.poll() is not None:
-            raise RuntimeError("Chromium failed to start")
+            raise RuntimeError("Browser failed to start")
 
-        out_path = os.path.join(self.stream_dir, "master.m3u8")
-        segment_pattern = os.path.join(self.stream_dir, "web_%05d.ts")
+        return audio_ok
 
+    def _build_web_capture_command(self, audio_ok, out_path, segment_pattern):
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -946,6 +596,8 @@ class DirectHLSStreamer:
             "1:a:0",
             "-vf",
             "format=yuv420p",
+            "-pix_fmt",
+            "yuv420p",
             "-c:v",
             "libx264",
             "-preset",
@@ -970,6 +622,8 @@ class DirectHLSStreamer:
             "0",
             "-force_key_frames",
             "expr:gte(t,n_forced*2)",
+            "-max_muxing_queue_size",
+            "4096",
             "-c:a",
             "aac",
             "-b:a",
@@ -999,9 +653,27 @@ class DirectHLSStreamer:
             out_path,
         ]
 
-        self.log.info("Starting FFmpeg webpage HLS capture")
+        return ffmpeg_cmd
 
-        self.proc = subprocess.Popen(
+    def _start_web_hls_capture(self, web_url):
+        self.log.info("Starting hidden webpage HLS capture: %s", web_url)
+
+        # Stop normal FFmpeg/file stream first.
+        self.stop()
+        self._stop_web_processes()
+
+        # Clean HLS directory, but preserve Brave/Chromium profile/extensions.
+        self._prepare_stream_dir(clear=True)
+        self._start_http_server()
+
+        audio_ok = self._start_hidden_browser(web_url)
+
+        out_path = os.path.join(self.stream_dir, "master.m3u8")
+        segment_pattern = os.path.join(self.stream_dir, "web_%05d.ts")
+        ffmpeg_cmd = self._build_web_capture_command(audio_ok, out_path, segment_pattern)
+
+        self.log.info("Starting FFmpeg webpage HLS capture")
+        proc = subprocess.Popen(
             ffmpeg_cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -1009,50 +681,65 @@ class DirectHLSStreamer:
             preexec_fn=os.setsid,
         )
 
-        self.started_at = time.time()
-        self.current_path = web_url
-        self.seek_offset = 0.0
-        self.duration = 0.0
-        self.stream_generation = int(time.time() * 1000)
-        self.stream_started_at = time.time()
-        self.subtitle_generation = int(time.time() * 1000)
-        self.subtitles_state = "none"
-        self.subtitle_tracks = []
-        self.audio_tracks = [
-            {
-                "track": 0,
-                "stream_index": None,
-                "language": "und",
-                "title": "Webpage Audio" if audio_ok else "Generated Silent Audio",
-                "codec": "pulse" if audio_ok else "generated",
-                "channels": 2,
-                "channel_layout": "stereo",
-                "display_name": "Webpage Audio" if audio_ok else "Generated Silent Audio",
-                "hls_name": "Webpage_Audio" if audio_ok else "Generated_Silent_Audio",
-            }
-        ]
+        with self.lock:
+            self.proc = proc
+            self.started_at = time.time()
+            self.current_path = web_url
+            self.seek_offset = 0.0
+            self.duration = 0.0
+            self.stream_generation = int(time.time() * 1000)
+            self.stream_started_at = time.time()
+            self.subtitle_generation = int(time.time() * 1000)
+            self.subtitles_state = "none"
+            self.subtitle_tracks = []
+            self.audio_tracks = [
+                {
+                    "track": 0,
+                    "stream_index": None,
+                    "language": "und",
+                    "title": "Webpage Audio" if audio_ok else "Generated Silent Audio",
+                    "codec": "pulse" if audio_ok else "generated",
+                    "channels": 2,
+                    "channel_layout": "stereo",
+                    "display_name": "Webpage Audio" if audio_ok else "Generated Silent Audio",
+                    "hls_name": "Webpage_Audio" if audio_ok else "Generated_Silent_Audio",
+                }
+            ]
 
-        # Compatibility live.m3u8 alias.
-        try:
-            with open(os.path.join(self.stream_dir, "live.m3u8"), "w", encoding="utf-8") as f:
-                f.write("#EXTM3U\n")
-                f.write("#EXT-X-STREAM-INF:BANDWIDTH=3000000\n")
-                f.write("master.m3u8\n")
-        except Exception:
-            pass
-
+        self._write_legacy_live_alias()
         self._write_status_file(web_url, 0.0, 0.0)
 
         def log_web_ffmpeg_errors():
-            if not self.proc or not self.proc.stderr:
+            if not proc.stderr:
                 return
-
-            for line in self.proc.stderr:
+            for line in proc.stderr:
                 line = line.strip()
                 if line:
                     self.log.warning("web ffmpeg: %s", line)
 
         threading.Thread(target=log_web_ffmpeg_errors, daemon=True).start()
+
+    def play_web(self, web_config):
+        web_url = (
+            web_config.get("web_url")
+            or web_config.get("url")
+            or web_config.get("uri")
+            or web_config.get("href")
+        )
+
+        if not web_url:
+            raise RuntimeError(f"play_web called without web_url/url: {web_config}")
+
+        self._start_web_hls_capture(web_url)
+
+    # Compatibility with previous integrated URL-path attempt.
+    def _build_webpage_ffmpeg_command(self, file_path, out_path, segment_pattern):
+        web_url = self._web_url_for_path(file_path)
+        audio_ok = self._start_hidden_browser(web_url)
+        return self._build_web_capture_command(audio_ok, out_path, segment_pattern)
+
+    def _start_webpage_renderer(self, url):
+        return self._start_hidden_browser(url)
 
     # -------------------------------------------------------------------------
     # Media inspection
@@ -1095,9 +782,7 @@ class DirectHLSStreamer:
         return 0.0
 
     def _is_image(self, file_path):
-        return str(file_path).lower().endswith(
-            (".png", ".jpg", ".jpeg", ".webp", ".bmp")
-        )
+        return str(file_path).lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
 
     def _ffprobe_streams(self, file_path):
         if self._is_webpage(file_path):
@@ -1168,7 +853,6 @@ class DirectHLSStreamer:
             tags = stream.get("tags") or {}
             language = (tags.get("language") or "und").lower()
             title = tags.get("title") or ""
-
             codec = stream.get("codec_name") or ""
             channels = stream.get("channels")
             channel_layout = stream.get("channel_layout") or ""
@@ -1251,7 +935,6 @@ class DirectHLSStreamer:
                 display_name = f"Subtitle {len(tracks) + 1}"
 
             track_number = len(tracks)
-
             tracks.append(
                 {
                     "track": track_number,
@@ -1321,7 +1004,6 @@ class DirectHLSStreamer:
 
         raw_text = raw_text.replace("\r\n", "\n").replace("\r", "\n")
         blocks = re.split(r"\n\s*\n", raw_text.strip())
-
         cues = []
 
         for block in blocks:
@@ -1341,7 +1023,6 @@ class DirectHLSStreamer:
 
             timing_index = None
             match = None
-
             for idx, line in enumerate(lines[:3]):
                 match = timestamp_re.match(line)
                 if match:
@@ -1354,7 +1035,6 @@ class DirectHLSStreamer:
             start = self._parse_vtt_timestamp(match.group("start"))
             end = self._parse_vtt_timestamp(match.group("end"))
             settings = match.group("settings") or ""
-
             if start is None or end is None:
                 continue
 
@@ -1363,7 +1043,6 @@ class DirectHLSStreamer:
                 cue_id_lines = [line for line in lines[:timing_index] if line.strip()]
 
             text_lines = lines[timing_index + 1:]
-
             cues.append(
                 {
                     "start": start,
@@ -1378,13 +1057,11 @@ class DirectHLSStreamer:
 
     def _normalize_vtt_auto(self, raw_path, output_path, seek_seconds):
         cues = self._collect_vtt_cues(raw_path)
-
         if not cues:
             self.log.info("No subtitle cues found in raw VTT")
             return False
 
         first_start = min(cue["start"] for cue in cues)
-
         if seek_seconds > 30 and first_start > max(30.0, seek_seconds * 0.50):
             offset = float(seek_seconds)
             self.log.info("Subtitle timestamps look absolute; subtracting seek offset %.2f", offset)
@@ -1401,12 +1078,10 @@ class DirectHLSStreamer:
 
             if new_end <= 0:
                 continue
-
             if new_start < 0:
                 new_start = 0.0
 
             new_lines = []
-
             for cue_id_line in cue["cue_id_lines"]:
                 if cue_id_line.strip():
                     new_lines.append(cue_id_line)
@@ -1414,9 +1089,7 @@ class DirectHLSStreamer:
             new_lines.append(
                 f"{self._format_vtt_timestamp(new_start)} --> {self._format_vtt_timestamp(new_end)}{cue['settings']}"
             )
-
             new_lines.extend(cue["text_lines"])
-
             output_blocks.append("\n".join(new_lines))
             output_blocks.append("")
             kept += 1
@@ -1441,7 +1114,6 @@ class DirectHLSStreamer:
                 self.subtitles_state = "none"
                 self.subtitle_generation = int(time.time() * 1000)
                 self.subtitle_tracks = []
-
             self._write_status_file(file_path, seek_seconds, self.duration)
             return
 
@@ -1457,14 +1129,12 @@ class DirectHLSStreamer:
             args=(file_path, seek_seconds, generation),
             daemon=True,
         )
-
         self.subtitle_thread = thread
         thread.start()
 
     def _extract_one_subtitle_track(self, file_path, seek_seconds, track_info, generation):
         track_number = track_info["track"]
         stream_index = track_info["stream_index"]
-
         subtitle_path = self._subtitle_track_path(track_number)
         raw_path = self._raw_subtitle_track_path(track_number)
 
@@ -1483,7 +1153,6 @@ class DirectHLSStreamer:
         subtitle_window = self.subtitle_window_seconds
         if duration_remaining > 0:
             subtitle_window = min(self.subtitle_window_seconds, duration_remaining + 10.0)
-
         subtitle_window = max(15.0, subtitle_window)
 
         cmd = [
@@ -1565,21 +1234,17 @@ class DirectHLSStreamer:
                     self.subtitles_state = "none"
                     self.subtitle_tracks = []
                     self.subtitle_generation = int(time.time() * 1000)
-
             self._write_status_file(file_path, seek_seconds, self.duration)
             return
 
         tracks = self._find_text_subtitle_tracks(file_path)
-
         if not tracks:
             self.log.info("No compatible text subtitle streams found")
-
             with self.lock:
                 if generation == self.stream_generation:
                     self.subtitles_state = "none"
                     self.subtitle_tracks = []
                     self.subtitle_generation = int(time.time() * 1000)
-
             self._write_status_file(file_path, seek_seconds, self.duration)
             return
 
@@ -1590,7 +1255,6 @@ class DirectHLSStreamer:
                 self.subtitle_generation = int(time.time() * 1000)
 
         self._write_status_file(file_path, seek_seconds, self.duration)
-
         ready_count = 0
 
         for track in tracks:
@@ -1600,12 +1264,9 @@ class DirectHLSStreamer:
                     return
 
             ok = self._extract_one_subtitle_track(file_path, seek_seconds, track, generation)
-
             if ok:
                 ready_count += 1
                 track["ready"] = True
-
-                # Compatibility alias: first ready track also becomes subtitles.vtt.
                 if not os.path.exists(self._subtitle_path()):
                     try:
                         shutil.copyfile(self._subtitle_track_path(track["track"]), self._subtitle_path())
@@ -1619,7 +1280,6 @@ class DirectHLSStreamer:
                     self.subtitle_tracks = tracks
                     self.subtitles_state = "ready" if ready_count > 0 else "pending"
                     self.subtitle_generation = int(time.time() * 1000)
-
             self._write_status_file(file_path, seek_seconds, self.duration)
 
         with self.lock:
@@ -1638,11 +1298,10 @@ class DirectHLSStreamer:
         """
         Normal video/image streaming path.
 
-        This is separate from webpage streaming so Chromium/Xvfb cannot affect
-        normal media files.
+        Web capture does not use this path, so Brave/Chromium/Xvfb cannot affect
+        normal movie/video/image files.
         """
         is_image = self._is_image(file_path)
-
         audio_tracks = self._find_audio_tracks(file_path)
 
         if not audio_tracks:
@@ -1707,7 +1366,6 @@ class DirectHLSStreamer:
                         "hls_name": "Generated_Silent_Audio",
                     }
                 ]
-
         else:
             if seek_seconds > 0:
                 cmd += ["-ss", str(seek_seconds)]
@@ -1715,17 +1373,16 @@ class DirectHLSStreamer:
             cmd += [
                 "-re",
                 "-analyzeduration",
-                "100M",
+                "200M",
                 "-probesize",
-                "100M",
+                "200M",
                 "-i",
                 file_path,
                 "-map",
-                "0:v:0",
+                "0:V:0",
             ]
 
             real_audio_count = 0
-
             for track in self.audio_tracks:
                 if track["stream_index"] is not None:
                     real_audio_count += 1
@@ -1749,27 +1406,26 @@ class DirectHLSStreamer:
             ]
 
         var_parts = ["v:0,agroup:audios"]
-
         for i, track in enumerate(self.audio_tracks):
             language = self._safe_hls_name(track.get("language") or "und", "und")
             name = self._safe_hls_name(track.get("display_name") or f"Audio_{i + 1}", f"Audio_{i + 1}")
-
             audio_part = f"a:{i},agroup:audios,language:{language},name:{name}"
             if i == 0:
                 audio_part += ",default:yes"
-
             var_parts.append(audio_part)
 
         var_stream_map = " ".join(var_parts)
 
         cmd += [
             "-vf",
-            "scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,format=yuv420p".format(
+            "scale={}:{}:force_original_aspect_ratio=decrease:flags=bicubic,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p".format(
                 self.width,
                 self.height,
                 self.width,
                 self.height,
             ),
+            "-pix_fmt",
+            "yuv420p",
             "-c:v",
             "libx264",
             "-preset",
@@ -1794,6 +1450,8 @@ class DirectHLSStreamer:
             "0",
             "-force_key_frames",
             "expr:gte(t,n_forced*2)",
+            "-max_muxing_queue_size",
+            "4096",
             "-c:a",
             "aac",
             "-b:a",
@@ -1829,7 +1487,6 @@ class DirectHLSStreamer:
 
         self.log.info("Audio tracks for HLS master: %s", json.dumps(self.audio_tracks))
         self.log.info("FFmpeg var_stream_map: %s", var_stream_map)
-
         return cmd
 
     # Backward-compatible method name.
@@ -1841,6 +1498,11 @@ class DirectHLSStreamer:
     # -------------------------------------------------------------------------
 
     def _start_stream(self, file_path, seek_seconds=0.0):
+        if self._is_webpage(file_path):
+            web_url = self._web_url_for_path(file_path)
+            self._start_web_hls_capture(web_url)
+            return
+
         self._stop_ffmpeg()
         self._prepare_stream_dir(clear=True)
         self._start_http_server()
@@ -1858,28 +1520,16 @@ class DirectHLSStreamer:
             self.subtitles_state = "pending"
             self.audio_tracks = []
             self.subtitle_tracks = []
-
             current_generation = self.stream_generation
 
-        if self._is_webpage(file_path):
-            out_path = os.path.join(self.stream_dir, "master.m3u8")
-            segment_pattern = os.path.join(self.stream_dir, "stream_%05d.ts")
-
-            cmd = self._build_webpage_ffmpeg_command(
-                file_path=file_path,
-                out_path=out_path,
-                segment_pattern=segment_pattern,
-            )
-        else:
-            out_path = os.path.join(self.stream_dir, "stream_%v.m3u8")
-            segment_pattern = os.path.join(self.stream_dir, "stream_%v_%05d.ts")
-
-            cmd = self._build_file_ffmpeg_command(
-                file_path=file_path,
-                seek_seconds=seek_seconds,
-                out_path=out_path,
-                segment_pattern=segment_pattern,
-            )
+        out_path = os.path.join(self.stream_dir, "stream_%v.m3u8")
+        segment_pattern = os.path.join(self.stream_dir, "stream_%v_%05d.ts")
+        cmd = self._build_file_ffmpeg_command(
+            file_path=file_path,
+            seek_seconds=seek_seconds,
+            out_path=out_path,
+            segment_pattern=segment_pattern,
+        )
 
         self.log.info("Starting FFmpeg direct HLS stream")
         self.log.info("Input: %s", file_path)
@@ -1906,7 +1556,6 @@ class DirectHLSStreamer:
         def log_ffmpeg_errors():
             if not proc.stderr:
                 return
-
             for line in proc.stderr:
                 line = line.strip()
                 if line:
