@@ -3,6 +3,7 @@ from fs42.timings import DAYS
 from fs42.sequence_io import SequenceIO
 from fs42.media_processor import MediaProcessor
 from fs42.sequence import NamedSequence, SequenceEntry
+from fs42.tag_grouping import expand_collection_tags
 
 
 class SequenceAPI:
@@ -126,12 +127,19 @@ class SequenceAPI:
         if "sequence" not in slot or "tags" not in slot:
             return
 
-        # the user supplied sequence name
-        if isinstance(slot["tags"], list):
-            for tag in slot["tags"]:
-                SequenceAPI._build_sequence(station_config, tag, slot)
-        else:
-            SequenceAPI._build_sequence(station_config, slot["tags"], slot)
+        tags = slot["tags"]
+        tag_list = tags if isinstance(tags, list) else [tags]
+
+        # Mirror slot_reader.get_tag_from_slot's expansion: a random_tags slot
+        # pointed at a top-level folder holding several shows (e.g. "G-Anime")
+        # gets one sequence built per show, not one for the whole combined
+        # folder - otherwise the sequences built here would never match the
+        # per-show tag that runtime tag resolution actually picks.
+        if slot.get("random_tags"):
+            tag_list = expand_collection_tags(station_config["content_dir"], tag_list)
+
+        for tag in tag_list:
+            SequenceAPI._build_sequence(station_config, tag, slot)
 
     @staticmethod
     def _build_sequence(station_config, this_tag, slot):

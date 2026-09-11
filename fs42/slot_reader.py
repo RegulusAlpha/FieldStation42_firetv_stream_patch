@@ -4,6 +4,7 @@ import random
 import math
 
 from fs42 import timings
+from fs42.tag_grouping import expand_collection_tags
 
 
 class SlotReader:
@@ -24,7 +25,7 @@ class SlotReader:
 
         return response
 
-    def get_tag_from_slot(slot, when: datetime):
+    def get_tag_from_slot(slot, when: datetime, content_dir=None):
         response = None
         if slot and "tags" in slot:
             tags = slot["tags"]
@@ -36,7 +37,15 @@ class SlotReader:
 
             if type(tags) is list:
                 if is_random:
-                    response = random.choice(tags)
+                    # If any of these tags is a folder that itself holds several
+                    # show subfolders (e.g. "G-Anime" holding Dragon Ball,
+                    # konosuba, Pokemon, ...), expand it into one tag per show
+                    # first, so a slot pointed at just the top-level folder
+                    # shuffles between shows the same way it would if every show
+                    # had been listed individually - instead of random_tags
+                    # being a no-op on a single combined tag.
+                    candidates = expand_collection_tags(content_dir, tags) if content_dir else tags
+                    response = random.choice(candidates)
                 else:
                     # first, figure out what our segments are
                     num_tags = len(tags)
@@ -51,6 +60,8 @@ class SlotReader:
                     return tags[current_segment]
             else:
                 response = tags
+                if is_random and content_dir:
+                    response = random.choice(expand_collection_tags(content_dir, [tags]))
 
         return response
 

@@ -369,7 +369,7 @@ class LiquidSchedule:
             else:
                 slot_config = forward_buffer.pop(0)
 
-            tag_str = SlotReader.get_tag_from_slot(slot_config, current_mark)
+            tag_str = SlotReader.get_tag_from_slot(slot_config, current_mark, content_dir=self.conf.get("content_dir"))
 
             new_block = None
             onair_flag = True
