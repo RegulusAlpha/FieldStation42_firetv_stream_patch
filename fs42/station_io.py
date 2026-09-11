@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import os
@@ -5,7 +6,7 @@ import glob
 import re
 import shutil
 import datetime
-from fs42.config_processor import ConfigProcessor
+from fs42.config_processor import ConfigProcessor, ConfigurationError
 from fs42 import schedule_hint
 from fs42 import timings
 
@@ -376,6 +377,22 @@ class StationIO:
                     warning = f"File not found: {station_conf[to_check]} (referenced in '{to_check}')"
                     self._l.warning(warning)
                     # Don't add to errors, just log warning
+
+        # Dry-run the same day_templates/slot_overrides/date_overrides resolution that
+        # happens for real when stations are (re)loaded after this save
+        # (ConfigProcessor.preprocess, invoked from _process_single_config). That reload
+        # path treats a ConfigurationError as fatal and exits the whole server process, so
+        # catching it here - before the file is ever written - is the difference between a
+        # normal validation error and taking down the running server. Only run this once we
+        # know network_name is present, since the error messages inside preprocess assume it.
+        if "network_name" in station_conf:
+            try:
+                ConfigProcessor.preprocess(copy.deepcopy(station_conf))
+            except ConfigurationError as e:
+                errors.append(f"Schedule configuration error: {e}")
+            except Exception as e:
+                self._l.error(f"Unexpected error while dry-running schedule configuration: {e}")
+                errors.append(f"Schedule configuration error: {e}")
 
         if errors:
             return False, errors

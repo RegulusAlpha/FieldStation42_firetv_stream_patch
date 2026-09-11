@@ -76,11 +76,33 @@
         .success-message.visible {
             display: block;
         }
+
+        .view-toggle {
+            display: flex;
+            gap: 0.5em;
+            margin: 1em 0;
+        }
+
+        .view-toggle button {
+            padding: 0.5em 1.25em;
+        }
+
+        .view-toggle button.active {
+            background: #1f6feb;
+            color: #fff;
+            border-color: #1f6feb;
+        }
+
+        #form-view, #schedule-view {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <script src="/static/common.js"></script>
     <script src="/static/fs42_client.js"></script>
+    <script src="/static/station_form.js"></script>
+    <script src="/static/station_schedule_editor.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
 
     <script>
@@ -89,6 +111,14 @@
         let isDirty = false;
         let originalContent = '';
         let isCreateMode = false;
+
+        // Shared in-memory config object, kept in sync with whichever view
+        // (JSON / Form / Schedule) the user is actively editing. The JSON
+        // editor's text remains the value that actually gets saved; Form and
+        // Schedule views read/write this object and get serialized back into
+        // the JSON editor whenever the user switches away from them.
+        let currentConfig = null;
+        let activeView = 'json';
 
         document.addEventListener('DOMContentLoaded', async function() {
             window.fs42Common.initTheme();
@@ -121,7 +151,15 @@
                     </a>
                 </div>
 
+                <div class="view-toggle">
+                    <button id="view-btn-json" class="pure-button active" onclick="switchView('json')">JSON</button>
+                    <button id="view-btn-form" class="pure-button" onclick="switchView('form')">Form</button>
+                    <button id="view-btn-schedule" class="pure-button" onclick="switchView('schedule')">Schedule</button>
+                </div>
+
                 <div id="editor-container"></div>
+                <div id="form-view"></div>
+                <div id="schedule-view"></div>
 
                 <div id="error-panel">
                     <div class="error-header">⚠️ Validation Errors</div>
@@ -256,6 +294,70 @@
             return format(obj);
         }
 
+        // --- View switching (JSON / Form / Schedule) -----------------------
+        //
+        // currentConfig is the single source of truth while the Form or
+        // Schedule view is active. The Monaco editor's text is the source of
+        // truth while the JSON view is active. Switching views syncs one
+        // into the other; saveStation() always syncs the active view into
+        // Monaco first, so Save behaves identically no matter which tab is
+        // showing.
+
+        function markFormDirty() {
+            isDirty = true;
+            updateSaveButton();
+        }
+
+        function syncJsonToObject() {
+            try {
+                currentConfig = JSON.parse(editor.getValue());
+                return true;
+            } catch (e) {
+                showError(`Cannot switch views: Invalid JSON - ${e.message}`);
+                return false;
+            }
+        }
+
+        function syncObjectToJson() {
+            // editor.setValue() synchronously fires onDidChangeModelContent,
+            // which recomputes isDirty against originalContent - no need to
+            // set it here too.
+            editor.setValue(compactJsonStringify(currentConfig, 4));
+        }
+
+        function renderActiveView() {
+            if (activeView === 'form') {
+                window.fs42Form.render(document.getElementById('form-view'), currentConfig.station_conf, markFormDirty);
+            } else if (activeView === 'schedule') {
+                window.fs42Schedule.render(document.getElementById('schedule-view'), currentConfig, stationName, markFormDirty);
+            }
+        }
+
+        function switchView(view) {
+            if (view === activeView) return;
+
+            if (activeView === 'json') {
+                if (!syncJsonToObject()) return;
+            } else if (view === 'json') {
+                syncObjectToJson();
+            }
+
+            hideError();
+            activeView = view;
+
+            document.getElementById('view-btn-json').classList.toggle('active', view === 'json');
+            document.getElementById('view-btn-form').classList.toggle('active', view === 'form');
+            document.getElementById('view-btn-schedule').classList.toggle('active', view === 'schedule');
+
+            document.getElementById('editor-container').style.display = (view === 'json') ? '' : 'none';
+            document.getElementById('form-view').style.display = (view === 'form') ? 'block' : 'none';
+            document.getElementById('schedule-view').style.display = (view === 'schedule') ? 'block' : 'none';
+
+            if (view !== 'json') {
+                renderActiveView();
+            }
+        }
+
         async function loadStation() {
             try {
                 const data = await window.fs42Api.get(`stations/${encodeURIComponent(stationName)}`);
@@ -264,6 +366,7 @@
                 const jsonStr = compactJsonStringify(data.station_config, 4);
                 originalContent = jsonStr;
                 editor.setValue(jsonStr);
+                currentConfig = data.station_config;
                 isDirty = false;
                 updateSaveButton();
 
@@ -289,6 +392,7 @@
 
                 originalContent = '';  // No original content for new stations
                 editor.setValue(jsonStr);
+                currentConfig = template;
                 isDirty = true;  // Mark as dirty since it's new
                 updateSaveButton();
 
@@ -305,6 +409,12 @@
             // Clear previous messages
             hideError();
             hideSuccess();
+
+            // Make sure whichever view is active (Form/Schedule) is reflected
+            // in the JSON editor before we read from it below.
+            if (activeView !== 'json') {
+                syncObjectToJson();
+            }
 
             // 1. Validate JSON syntax
             let config;
@@ -330,6 +440,10 @@
                 showError('Missing required field: channel_number');
                 return;
             }
+
+            // Keep currentConfig in sync in case the user hand-edited the JSON
+            // view directly (bypassing Form/Schedule), then switches views next.
+            currentConfig = config;
 
             // 3. Send to API
             try {
