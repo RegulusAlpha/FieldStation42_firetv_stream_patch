@@ -25,7 +25,7 @@ class SlotReader:
 
         return response
 
-    def get_tag_from_slot(slot, when: datetime, content_dir=None):
+    def get_tag_from_slot(slot, when: datetime, content_dir=None, recent_tags=None):
         response = None
         if slot and "tags" in slot:
             tags = slot["tags"]
@@ -45,6 +45,7 @@ class SlotReader:
                     # had been listed individually - instead of random_tags
                     # being a no-op on a single combined tag.
                     candidates = expand_collection_tags(content_dir, tags) if content_dir else tags
+                    candidates = SlotReader._avoid_overrepeat(candidates, recent_tags)
                     response = random.choice(candidates)
                 else:
                     # first, figure out what our segments are
@@ -61,9 +62,32 @@ class SlotReader:
             else:
                 response = tags
                 if is_random and content_dir:
-                    response = random.choice(expand_collection_tags(content_dir, [tags]))
+                    candidates = SlotReader._avoid_overrepeat(expand_collection_tags(content_dir, [tags]), recent_tags)
+                    response = random.choice(candidates)
 
         return response
+
+    @staticmethod
+    def _avoid_overrepeat(candidates, recent_tags, max_repeat=2):
+        """
+        Shuffle/sequential-shuffle picks are otherwise a plain independent
+        random.choice() each time, which can occasionally roll the same show
+        several times in a row. If the last `max_repeat` picks were all the
+        same tag, drop it from the candidate pool for this pick so something
+        else gets rolled instead - unless that tag is the only candidate
+        there is (e.g. a single-show tag, or a marathon), in which case there
+        is nothing else to pick and it stays.
+        """
+        if not recent_tags or len(recent_tags) < max_repeat:
+            return candidates
+
+        last_n = recent_tags[-max_repeat:]
+        if len(set(last_n)) != 1:
+            return candidates
+
+        overrepeated = last_n[0]
+        filtered = [c for c in candidates if c != overrepeated]
+        return filtered if filtered else candidates
 
     @staticmethod
     def _date_key_matches(date_key, when: datetime):

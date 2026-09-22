@@ -357,6 +357,13 @@ class LiquidSchedule:
 
         forward_buffer = []
 
+        # Tracks the last couple of shuffled/sequential-shuffled tags actually
+        # picked (most-recent-last), so get_tag_from_slot can avoid rolling
+        # the same show a third time in a row. Deliberately not reset by
+        # marathons (which reuse the same fixed slot_config on purpose) or by
+        # off-air/no-tag blocks (nothing to record).
+        recent_tags = []
+
         # build exclusion index from sibling channels that share the same content_dir
         exclusion_index = self._build_exclusion_index(start_time, end_target)
 
@@ -369,7 +376,12 @@ class LiquidSchedule:
             else:
                 slot_config = forward_buffer.pop(0)
 
-            tag_str = SlotReader.get_tag_from_slot(slot_config, current_mark, content_dir=self.conf.get("content_dir"))
+            tag_str = SlotReader.get_tag_from_slot(
+                slot_config, current_mark, content_dir=self.conf.get("content_dir"), recent_tags=recent_tags
+            )
+            if tag_str is not None:
+                recent_tags.append(tag_str)
+                del recent_tags[:-2]
 
             new_block = None
             onair_flag = True

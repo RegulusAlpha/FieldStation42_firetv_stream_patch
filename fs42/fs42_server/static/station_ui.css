@@ -1,5 +1,16 @@
 /* Station UI Styles for FieldStation42 */
 
+.pure-button.danger {
+    background: #3a1414;
+    border: 1px solid #a33;
+    color: #faa;
+}
+
+.pure-button.danger:hover {
+    background: #a33;
+    color: #fff;
+}
+
 /* Station Cards */
 .station-cards {
     display: grid;

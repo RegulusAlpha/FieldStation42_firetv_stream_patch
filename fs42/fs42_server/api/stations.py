@@ -171,10 +171,15 @@ async def update_station(network_name: str, config: StationConfigRequest):
     }
 
 @router.delete("/{network_name}", response_model=StationConfigResponse)
-async def delete_station(network_name: str):
+async def delete_station(network_name: str, purge: bool = False):
     """
     Delete a station configuration.
     Uses StationManager for existence checks and file deletion, then reloads.
+
+    purge=true also wipes the station's generated catalog, schedule, and
+    sequences from runtime/fs42_fluid.db, so nothing is left orphaned behind
+    a config that no longer exists. It never touches the actual media files
+    the station pointed at.
     """
     station_manager = StationManager()
 
@@ -186,7 +191,7 @@ async def delete_station(network_name: str):
         )
 
     # Delete the configuration (StationManager handles file deletion via StationIO)
-    success, message = station_manager.delete_station_config(network_name)
+    success, message = station_manager.delete_station_config(network_name, purge_data=purge)
 
     if not success:
         raise HTTPException(

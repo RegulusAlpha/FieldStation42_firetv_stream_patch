@@ -236,11 +236,33 @@ class StationManager(object):
 
         return success, message, file_path
 
-    def delete_station_config(self, network_name):
+    def delete_station_config(self, network_name, purge_data=False):
         """
         Delete a station configuration.
         Delegates to StationIO for all the work, then reloads.
+
+        If purge_data is True, also wipes everything FS42 has stored *about*
+        this station - its schedule, catalog, and sequences - so nothing
+        orphaned is left behind in runtime/fs42_fluid.db once the config is
+        gone. This never touches the actual media files/folders the station
+        pointed at (content_dir, bump_dir, etc.) - only FS42's own generated
+        data about them.
         """
+        if purge_data:
+            station = self.station_by_name(network_name)
+            if station:
+                # Local imports to avoid a circular import: catalog_io/liquid_io/
+                # sequence_io each import StationManager themselves.
+                from fs42.catalog_api import CatalogAPI
+                from fs42.liquid_api import LiquidAPI
+                from fs42.sequence_api import SequenceAPI
+
+                _l = logging.getLogger("STATIONMANAGER")
+                _l.info(f"Purging catalog, schedule, and sequences for {network_name}")
+                CatalogAPI.delete_catalog(station)
+                LiquidAPI.delete_blocks(station)
+                SequenceAPI.delete_sequences(station)
+
         # Let StationIO handle existence checks and file deletion
         success, message = self.station_io.remove_station_config(network_name, self.stations)
 

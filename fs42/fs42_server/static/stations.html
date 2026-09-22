@@ -195,6 +195,9 @@
                             <button class="pure-button" onclick="duplicateStation('${escapeHtml(station.network_name)}')">
                                 Duplicate
                             </button>
+                            <button class="pure-button danger" onclick="deleteStation('${escapeHtml(station.network_name)}')">
+                                Delete
+                            </button>
                         </div>
                     </div>
                 `;
@@ -298,6 +301,23 @@
 
             } catch (error) {
                 alert(`Error duplicating station: ${error.message}`);
+            }
+        }
+
+        async function deleteStation(networkName) {
+            const confirmed = confirm(
+                `Delete "${networkName}"?\n\n` +
+                `This removes the channel, its generated schedule, and its catalog. ` +
+                `It does NOT delete or move any of the actual video files/folders the channel pointed at.\n\n` +
+                `This cannot be undone from the web UI.`
+            );
+            if (!confirmed) return;
+
+            try {
+                await window.fs42Api.delete(`stations/${encodeURIComponent(networkName)}?purge=true`);
+                await loadStations();
+            } catch (error) {
+                alert(`Error deleting station: ${error.detail || error.message}`);
             }
         }
 
